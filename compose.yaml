@@ -1,0 +1,10 @@
+services:
+  intesa-vincente:
+    build:
+      context: .
+      network: host
+    ports:
+      - "5522:5522"
+    environment:
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://intesa.cunardi.com}
+    restart: unless-stopped

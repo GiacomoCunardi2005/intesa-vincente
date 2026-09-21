@@ -1,0 +1,7 @@
+.git
+__pycache__/
+*.py[cod]
+.venv/
+graphify-out/
+intesa_vincente.py
+L'intesa vincente.jar

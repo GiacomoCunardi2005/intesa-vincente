@@ -1,0 +1,243 @@
+const $ = (selector) => document.querySelector(selector);
+
+const joinPanel = $("#join-panel");
+const joinForm = $("#join-form");
+const nameInput = $("#name");
+const roleInputs = [...document.querySelectorAll('input[name="initial-role"]')];
+const game = $("#game");
+const connection = $("#connection");
+const word = $("#word");
+const timer = $("#timer");
+const score = $("#score");
+const status = $("#status");
+const wordFrame = $("#word-frame");
+const roleBadge = $("#role-badge");
+const roleHint = $("#role-hint");
+const notice = $("#notice");
+const joinNotice = $("#join-notice");
+const controlsPanel = $("#controls-panel");
+const playerList = $("#player-list");
+const spectators = $("#spectators");
+const helpButton = $("#help-button");
+const restartButton = $("#restart-button");
+const rulesDialog = $("#rules-dialog");
+const ruleImage = $("#rule-image");
+const rulePage = $("#rule-page");
+const previousRule = $("#previous-rule");
+const nextRule = $("#next-rule");
+const statRound = $("#stat-round");
+const statScore = $("#stat-score");
+const statCorrect = $("#stat-correct");
+const statWrong = $("#stat-wrong");
+const statPasses = $("#stat-passes");
+const statDoubles = $("#stat-doubles");
+const actionButtons = [...document.querySelectorAll("[data-action]")];
+
+const TOKEN_KEY = "intesa-vincente-token";
+const NAME_KEY = "intesa-vincente-name";
+const ROLE_KEY = "intesa-vincente-initial-role";
+const frames = { normal: "normale.png", correct: "giusto.png", wrong: "errore.png" };
+const rules = ["info1.jpg", "info2.jpg", "info3.jpg"];
+const roleLabels = {
+  controller: "Suggeritore con comandi",
+  helper: "Secondo suggeritore",
+  guesser: "Indovino",
+  spectator: "Spettatore",
+};
+let socket;
+let roomState;
+let joinedName = "";
+let joinedInitialRole = "controller";
+let reconnectDelay = 500;
+let reconnectTimer;
+let currentRule = 0;
+
+nameInput.value = localStorage.getItem(NAME_KEY) || "";
+const savedRole = localStorage.getItem(ROLE_KEY);
+const savedRoleInput = roleInputs.find((input) => input.value === savedRole);
+if (savedRoleInput) savedRoleInput.checked = true;
+
+function selectedInitialRole() {
+  return roleInputs.find((input) => input.checked)?.value || "controller";
+}
+
+function setConnection(message) {
+  connection.textContent = message;
+}
+
+function setNotice(message = "") {
+  notice.textContent = message;
+  joinNotice.textContent = message;
+}
+
+function socketUrl() {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${location.host}/ws`;
+}
+
+function sendJoin() {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({
+      type: "join",
+      name: joinedName,
+      initialRole: joinedInitialRole,
+      token: localStorage.getItem(TOKEN_KEY),
+    }));
+  }
+}
+
+function connect(name, initialRole) {
+  clearTimeout(reconnectTimer);
+  joinedName = name;
+  joinedInitialRole = initialRole;
+  setConnection("Connessione in corso…");
+  socket = new WebSocket(socketUrl());
+
+  socket.addEventListener("open", () => {
+    reconnectDelay = 500;
+    sendJoin();
+  });
+
+  socket.addEventListener("message", ({ data }) => {
+    let payload;
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (payload.type === "joined") {
+      localStorage.setItem(TOKEN_KEY, payload.token);
+      localStorage.setItem(NAME_KEY, joinedName);
+      localStorage.setItem(ROLE_KEY, joinedInitialRole);
+      joinPanel.hidden = true;
+      game.hidden = false;
+      setNotice();
+      setConnection("Connesso");
+    } else if (payload.type === "state") {
+      roomState = payload;
+      render();
+    } else if (payload.type === "error") {
+      setNotice(payload.message || "Operazione non disponibile.");
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    setConnection("Disconnesso: riconnessione…");
+    if (joinedName) {
+      reconnectTimer = setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+        connect(joinedName, joinedInitialRole);
+      }, reconnectDelay);
+    }
+  });
+
+  socket.addEventListener("error", () => setConnection("Connessione non disponibile"));
+}
+
+function canUse(action, room, canControl) {
+  if (!canControl) return false;
+  if (action === "space") return ["idle", "double-ready", "running"].includes(room.phase);
+  if (["correct", "wrong", "pass"].includes(action)) return room.phase === "stopped";
+  if (action === "double") return room.phase === "idle" && room.score >= 2 && room.doubles < 2;
+  return true;
+}
+
+function describeRole(role) {
+  if (role === "controller") return "Vedi la parola e gestisci tutti i comandi della squadra.";
+  if (role === "helper") return "Vedi la parola e dai gli indizi alternandoti al suggeritore con comandi.";
+  if (role === "guesser") return "Non ricevi la parola: ascolta gli indizi e prova a indovinare.";
+  return "Segui la partita e le statistiche della squadra in tempo reale.";
+}
+
+function render() {
+  const { you, room } = roomState;
+  const canControl = you.can_control === true;
+  const wordIsHidden = room.word === null;
+  word.textContent = room.word ?? "PAROLA NASCOSTA";
+  word.classList.toggle("is-hidden", wordIsHidden);
+  word.setAttribute("aria-label", wordIsHidden ? "Parola nascosta" : `Parola: ${room.word}`);
+  timer.textContent = room.remaining;
+  score.textContent = room.score;
+  status.textContent = room.status;
+  wordFrame.src = `/assets/img/${frames[room.feedback] || frames.normal}`;
+  roleBadge.textContent = roleLabels[you.role] || "Spettatore";
+  roleHint.textContent = describeRole(you.role);
+  controlsPanel.hidden = !canControl;
+  spectators.textContent = room.spectators;
+  helpButton.hidden = room.started;
+  restartButton.hidden = !canControl || !room.started;
+  statRound.textContent = room.round;
+  statScore.textContent = room.score;
+  statCorrect.textContent = room.correct;
+  statWrong.textContent = room.wrong;
+  statPasses.textContent = `${room.passes} / 3`;
+  statDoubles.textContent = `${room.doubles} / 2`;
+  playerList.replaceChildren(...room.players.map((player, index) => {
+    const item = document.createElement("li");
+    const seat = document.createElement("span");
+    const playerName = document.createElement("strong");
+    seat.textContent = index + 1;
+    playerName.textContent = player
+      ? `${player.name} — ${roleLabels[player.turn_role] || "Giocatore"}`
+      : "Posto libero";
+    item.append(seat, playerName);
+    return item;
+  }));
+  actionButtons.forEach((button) => {
+    button.disabled = !canUse(button.dataset.action, room, canControl);
+  });
+}
+
+function sendAction(action) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    setNotice("Connessione non disponibile.");
+    return;
+  }
+  socket.send(JSON.stringify({ type: "action", action }));
+}
+
+function updateRule() {
+  ruleImage.src = `/assets/img/${rules[currentRule]}`;
+  ruleImage.alt = `Istruzioni di gioco, pagina ${currentRule + 1}`;
+  rulePage.textContent = `${currentRule + 1} / ${rules.length}`;
+  previousRule.disabled = currentRule === 0;
+  nextRule.disabled = currentRule === rules.length - 1;
+}
+
+joinForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = nameInput.value.trim();
+  if (!name) return;
+  const initialRole = selectedInitialRole();
+  if (socket?.readyState === WebSocket.OPEN && !roomState) {
+    joinedName = name;
+    joinedInitialRole = initialRole;
+    sendJoin();
+  } else {
+    connect(name, initialRole);
+  }
+});
+
+actionButtons.forEach((button) => button.addEventListener("click", () => sendAction(button.dataset.action)));
+restartButton.addEventListener("click", () => sendAction("restart"));
+helpButton.addEventListener("click", () => rulesDialog.showModal());
+previousRule.addEventListener("click", () => { currentRule -= 1; updateRule(); });
+nextRule.addEventListener("click", () => { currentRule += 1; updateRule(); });
+
+window.addEventListener("keydown", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLElement && target.closest("input, textarea, select, button, dialog")) return;
+  if (!roomState?.you.can_control || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+  const action = {
+    Space: "space",
+    Enter: "correct",
+    Backspace: "wrong",
+    KeyP: "pass",
+    KeyR: "double",
+  }[event.code];
+  if (!action) return;
+  event.preventDefault();
+  if (canUse(action, roomState.room, true)) sendAction(action);
+});
+
+updateRule();

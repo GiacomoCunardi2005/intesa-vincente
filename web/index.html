@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#081d61">
+    <title>L'intesa vincente</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">Stanza multiplayer</p>
+          <h1>L'intesa vincente</h1>
+        </div>
+        <p id="connection" class="connection" aria-live="polite">Non connesso</p>
+      </header>
+
+      <section id="join-panel" class="panel join-panel" aria-labelledby="join-title">
+        <h2 id="join-title">Entra nella squadra</h2>
+        <p>Scegli chi essere nel primo turno. I tre ruoli ruotano allo scadere del tempo.</p>
+        <form id="join-form">
+          <label for="name">Il tuo nome</label>
+          <input id="name" name="name" maxlength="24" autocomplete="name" required>
+          <fieldset class="role-choice">
+            <legend>Ruolo iniziale</legend>
+            <label><input type="radio" name="initial-role" value="controller" checked> Suggeritore con comandi</label>
+            <label><input type="radio" name="initial-role" value="helper"> Secondo suggeritore</label>
+            <label><input type="radio" name="initial-role" value="guesser"> Indovino</label>
+            <label><input type="radio" name="initial-role" value="spectator"> Spettatore</label>
+          </fieldset>
+          <div class="join-row"><button type="submit">Entra</button></div>
+        </form>
+        <p id="join-notice" class="notice" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="game" class="game" hidden>
+        <div class="game-main">
+          <section class="panel stage-panel" aria-label="Tabellone di gioco">
+            <div id="board" class="board">
+              <p id="status" class="board-status" aria-live="polite">In attesa dei giocatori.</p>
+              <img id="word-frame" class="word-frame" src="/assets/img/normale.png" alt="">
+              <output id="timer" class="timer" aria-label="Tempo rimanente" aria-live="polite">60</output>
+              <output id="word" class="word" aria-live="polite">Parola nascosta</output>
+              <output id="score" class="score" aria-label="Punteggio" aria-live="polite">0</output>
+              <button id="help-button" class="board-image-button help-button" type="button" aria-label="Mostra le istruzioni">
+                <img src="/assets/img/info.png" alt="">
+              </button>
+              <button id="restart-button" class="board-image-button restart-button" type="button" aria-label="Ricomincia la partita" hidden>
+                <img src="/assets/img/ricomincia.png" alt="">
+              </button>
+            </div>
+          </section>
+
+          <section id="controls-panel" class="panel controls-panel" aria-labelledby="controls-title" hidden>
+            <div class="controls-heading">
+              <div>
+                <h2 id="controls-title">Comandi del suggeritore</h2>
+                <p>Solo tu puoi avviare, fermare e convalidare la parola in questo turno.</p>
+              </div>
+            </div>
+            <div id="controls" class="controls">
+              <button type="button" data-action="space"><kbd>Spazio</kbd> Avvia / ferma</button>
+              <button type="button" data-action="correct"><kbd>Invio</kbd> Giusta</button>
+              <button type="button" data-action="wrong"><kbd>Backspace</kbd> Errore</button>
+              <button type="button" data-action="pass"><kbd>P</kbd> Passa</button>
+              <button type="button" data-action="double"><kbd>R</kbd> Raddoppio</button>
+              <button type="button" data-action="restart">Ricomincia</button>
+            </div>
+          </section>
+
+          <section id="stats-panel" class="panel stats-panel" aria-labelledby="stats-title">
+            <div class="controls-heading">
+              <div>
+                <h2 id="stats-title">Statistiche della squadra</h2>
+                <p id="role-hint">Entra nella stanza per vedere il tuo ruolo.</p>
+              </div>
+              <span id="role-badge" class="role-badge">—</span>
+            </div>
+            <dl class="stats-grid">
+              <div><dt>Turno</dt><dd id="stat-round">1</dd></div>
+              <div><dt>Punti</dt><dd id="stat-score">0</dd></div>
+              <div><dt>Giuste</dt><dd id="stat-correct">0</dd></div>
+              <div><dt>Errori</dt><dd id="stat-wrong">0</dd></div>
+              <div><dt>Passi</dt><dd id="stat-passes">0 / 3</dd></div>
+              <div><dt>Raddoppi</dt><dd id="stat-doubles">0 / 2</dd></div>
+            </dl>
+            <p id="notice" class="notice" role="status" aria-live="polite"></p>
+          </section>
+        </div>
+
+        <aside class="panel roster" aria-labelledby="roster-title">
+          <h2 id="roster-title">Giocatori</h2>
+          <ol id="player-list" class="player-list">
+            <li><span>1</span><strong>Posto libero</strong></li>
+            <li><span>2</span><strong>Posto libero</strong></li>
+            <li><span>3</span><strong>Posto libero</strong></li>
+          </ol>
+          <p class="spectators"><span id="spectators">0</span> spettatori</p>
+          <p class="roster-note">I due suggeritori vedono la parola; l’indovino riceve solo le statistiche.</p>
+        </aside>
+      </section>
+    </main>
+
+    <dialog id="rules-dialog" class="rules-dialog" aria-labelledby="rules-title">
+      <form method="dialog" class="dialog-top"><button aria-label="Chiudi istruzioni">×</button></form>
+      <h2 id="rules-title">Come si gioca online</h2>
+      <p class="rules-note">Il suggeritore con comandi gestisce i tasti. L’altro suggeritore vede la parola; l’indovino no.</p>
+      <img id="rule-image" src="/assets/img/info1.jpg" alt="Istruzioni di gioco, pagina 1">
+      <div class="dialog-actions">
+        <button id="previous-rule" type="button">Indietro</button>
+        <span id="rule-page">1 / 3</span>
+        <button id="next-rule" type="button">Avanti</button>
+      </div>
+    </dialog>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
