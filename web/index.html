@@ -19,7 +19,7 @@
 
       <section id="join-panel" class="panel join-panel" aria-labelledby="join-title">
         <h2 id="join-title">Entra nella squadra</h2>
-        <p>Scegli chi essere nel primo turno. I tre ruoli ruotano allo scadere del tempo.</p>
+        <p>Scegli chi essere nel primo turno. I tre ruoli ruotano allo scadere del tempo; puoi diventare spettatore e rientrare in un posto libero.</p>
         <form id="join-form">
           <label for="name">Il tuo nome</label>
           <input id="name" name="name" maxlength="24" autocomplete="name" required>
@@ -97,8 +97,12 @@
             <li><span>2</span><strong>Posto libero</strong></li>
             <li><span>3</span><strong>Posto libero</strong></li>
           </ol>
+          <div class="membership-actions">
+            <button id="spectate-button" type="button" hidden>Diventa spettatore — termina la partita</button>
+            <div id="claim-seat-actions" hidden></div>
+          </div>
           <p class="spectators"><span id="spectators">0</span> spettatori</p>
-          <p class="roster-note">I due suggeritori vedono la parola; l’indovino riceve solo le statistiche.</p>
+          <p class="roster-note">I due suggeritori vedono la parola; l’indovino riceve solo le statistiche. Se un giocatore esce, la partita si annulla.</p>
         </aside>
       </section>
     </main>

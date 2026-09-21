@@ -17,6 +17,8 @@ const notice = $("#notice");
 const joinNotice = $("#join-notice");
 const controlsPanel = $("#controls-panel");
 const playerList = $("#player-list");
+const spectateButton = $("#spectate-button");
+const claimSeatActions = $("#claim-seat-actions");
 const spectators = $("#spectators");
 const helpButton = $("#help-button");
 const restartButton = $("#restart-button");
@@ -44,6 +46,7 @@ const roleLabels = {
   guesser: "Indovino",
   spectator: "Spettatore",
 };
+const initialRoleForSeat = { 1: "controller", 2: "helper", 3: "guesser" };
 let socket;
 let roomState;
 let joinedName = "";
@@ -51,6 +54,7 @@ let joinedInitialRole = "controller";
 let reconnectDelay = 500;
 let reconnectTimer;
 let currentRule = 0;
+let pendingSeat;
 
 nameInput.value = localStorage.getItem(NAME_KEY) || "";
 const savedRole = localStorage.getItem(ROLE_KEY);
@@ -59,6 +63,11 @@ if (savedRoleInput) savedRoleInput.checked = true;
 
 function selectedInitialRole() {
   return roleInputs.find((input) => input.checked)?.value || "controller";
+}
+
+function rememberInitialRole(role) {
+  joinedInitialRole = role;
+  localStorage.setItem(ROLE_KEY, role);
 }
 
 function setConnection(message) {
@@ -117,12 +126,13 @@ function connect(name, initialRole) {
       roomState = payload;
       render();
     } else if (payload.type === "error") {
+      pendingSeat = undefined;
       setNotice(payload.message || "Operazione non disponibile.");
     }
   });
 
   socket.addEventListener("close", () => {
-    setConnection("Disconnesso: riconnessione…");
+    setConnection("Disconnesso: provo a rientrare entro 30 s…");
     if (joinedName) {
       reconnectTimer = setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, 5000);
@@ -149,6 +159,41 @@ function describeRole(role) {
   return "Segui la partita e le statistiche della squadra in tempo reale.";
 }
 
+function roleForSeat(room, seat) {
+  return ["controller", "helper", "guesser"].find((role) => room[`${role}_seat`] === seat);
+}
+
+function renderMembership(room, you) {
+  const isPlayer = Number.isInteger(you.seat);
+  spectateButton.hidden = !isPlayer;
+  claimSeatActions.hidden = isPlayer;
+  claimSeatActions.replaceChildren();
+  if (isPlayer) {
+    if (pendingSeat === you.seat) {
+      rememberInitialRole(initialRoleForSeat[you.seat]);
+      pendingSeat = undefined;
+    }
+    return;
+  }
+
+  rememberInitialRole("spectator");
+  const freeSeats = room.players
+    .map((player, index) => (!player ? index + 1 : null))
+    .filter(Boolean);
+  const label = document.createElement("p");
+  label.textContent = freeSeats.length ? "Posti disponibili" : "Nessun posto libero.";
+  claimSeatActions.append(label);
+  freeSeats.forEach((seat) => {
+    const role = roleForSeat(room, seat);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `Entra come ${roleLabels[role]} (posto ${seat})`;
+    button.disabled = socket?.readyState !== WebSocket.OPEN;
+    button.addEventListener("click", () => sendMembership("claim-seat", seat));
+    claimSeatActions.append(button);
+  });
+}
+
 function render() {
   const { you, room } = roomState;
   const canControl = you.can_control === true;
@@ -163,6 +208,7 @@ function render() {
   roleBadge.textContent = roleLabels[you.role] || "Spettatore";
   roleHint.textContent = describeRole(you.role);
   controlsPanel.hidden = !canControl;
+  renderMembership(room, you);
   spectators.textContent = room.spectators;
   helpButton.hidden = room.started;
   restartButton.hidden = !canControl || !room.started;
@@ -177,9 +223,11 @@ function render() {
     const seat = document.createElement("span");
     const playerName = document.createElement("strong");
     seat.textContent = index + 1;
-    playerName.textContent = player
+    const playerLabel = player
       ? `${player.name} — ${roleLabels[player.turn_role] || "Giocatore"}`
       : "Posto libero";
+    playerName.textContent = player?.connected === false ? `${playerLabel} — disconnesso (30 s)` : playerLabel;
+    item.classList.toggle("is-disconnected", player?.connected === false);
     item.append(seat, playerName);
     return item;
   }));
@@ -194,6 +242,15 @@ function sendAction(action) {
     return;
   }
   socket.send(JSON.stringify({ type: "action", action }));
+}
+
+function sendMembership(type, seat) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    setNotice("Connessione non disponibile.");
+    return;
+  }
+  if (type === "claim-seat") pendingSeat = seat;
+  socket.send(JSON.stringify({ type, ...(seat ? { seat } : {}) }));
 }
 
 function updateRule() {
@@ -220,6 +277,7 @@ joinForm.addEventListener("submit", (event) => {
 
 actionButtons.forEach((button) => button.addEventListener("click", () => sendAction(button.dataset.action)));
 restartButton.addEventListener("click", () => sendAction("restart"));
+spectateButton.addEventListener("click", () => sendMembership("spectate"));
 helpButton.addEventListener("click", () => rulesDialog.showModal());
 previousRule.addEventListener("click", () => { currentRule -= 1; updateRule(); });
 nextRule.addEventListener("click", () => { currentRule += 1; updateRule(); });

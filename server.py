@@ -22,6 +22,7 @@ WEB = ROOT / "web"
 MAX_PLAYERS = 3
 ROUND_SECONDS = 60
 FEEDBACK_SECONDS = 0.54
+DISCONNECT_GRACE_SECONDS = 30
 INITIAL_ROLE_SEATS = {"controller": 1, "helper": 2, "guesser": 3}
 
 
@@ -58,6 +59,9 @@ class Session:
     name: str
     seat: int | None = None
     socket: web.WebSocketResponse | None = None
+    disconnect_task: asyncio.Task[None] | None = None
+    disconnect_generation: int = 0
+    last_seen: float | None = None
 
 
 class GameRoom:
@@ -72,11 +76,16 @@ class GameRoom:
         self.lock = asyncio.Lock()
         self.timer_task: asyncio.Task[None] | None = None
         self.feedback_task: asyncio.Task[None] | None = None
+        self.disconnect_grace_seconds = DISCONNECT_GRACE_SECONDS
         self.deadline: float | None = None
+        self.closing = False
         self._reset_state()
 
     def _team_ready(self) -> bool:
         return all(self.players)
+
+    def _is_player(self, session: Session) -> bool:
+        return session.seat is not None and self.players[session.seat - 1] == session.token
 
     def _seat_name(self, seat: int) -> str:
         token = self.players[seat - 1]
@@ -149,9 +158,33 @@ class GameRoom:
         return word
 
     def _role(self, session: Session) -> tuple[str, int | None]:
-        if session.seat is not None and self.players[session.seat - 1] == session.token:
+        if self._is_player(session):
             return self._turn_role(session.seat), session.seat
         return "spectator", None
+
+    def _cancel_disconnect(self, session: Session) -> None:
+        session.disconnect_generation += 1
+        task = session.disconnect_task
+        session.disconnect_task = None
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+
+    def _disconnect_delay(self, session: Session) -> float:
+        if session.last_seen is None:
+            return self.disconnect_grace_seconds
+        elapsed = asyncio.get_running_loop().time() - session.last_seen
+        return max(0, self.disconnect_grace_seconds - elapsed)
+
+    def _make_spectator(self, session: Session, reason: str) -> bool:
+        if not self._is_player(session):
+            return False
+        seat = session.seat
+        assert seat is not None
+        self.players[seat - 1] = None
+        session.seat = None
+        self._reset_state()
+        self.status = f"{session.name} {reason}. Partita terminata. {self._lobby_status()}"
+        return True
 
     def _active_word(self) -> bool:
         return self.phase in {"running", "stopped", "feedback"}
@@ -173,6 +206,7 @@ class GameRoom:
                     "seat": index + 1,
                     "name": player.name if player else "Posto libero",
                     "turn_role": self._turn_role(index + 1) if player else None,
+                    "connected": bool(player and player.socket is not None and not player.socket.closed),
                 }
                 if player
                 else None
@@ -227,7 +261,10 @@ class GameRoom:
 
     async def join(self, socket: web.WebSocketResponse, name: str, token: object, seat: int | None) -> Session:
         async with self.lock:
+            if self.closing:
+                raise ValueError("Server in riavvio: riprova tra poco.")
             session = self.sessions.get(token) if isinstance(token, str) else None
+            is_returning = session is not None
             if session is None:
                 if seat is not None and self.players[seat - 1] is not None:
                     raise ValueError("Questo ruolo iniziale è già occupato.")
@@ -236,29 +273,84 @@ class GameRoom:
                 if seat is not None:
                     self.players[seat - 1] = session.token
             else:
-                if session.seat != seat:
-                    raise ValueError("Il tuo ruolo è già stato scelto per questa connessione.")
+                # Il ruolo iniziale vale solo al primo ingresso: il token conserva
+                # il posto attuale anche dopo una riconnessione.
+                self._cancel_disconnect(session)
                 if session.socket is not None and session.socket is not socket and not session.socket.closed:
                     await session.socket.close(code=4001, message=b"Connection replaced")
                 session.name = name
             session.socket = socket
+            session.last_seen = asyncio.get_running_loop().time()
             if not self.started:
                 self.status = self._lobby_status()
+            elif is_returning and session.seat is not None:
+                self.status = f"{session.name} è rientrato nella squadra."
             await socket.send_json({"type": "joined", "token": session.token})
             await self._broadcast()
             return session
 
-    async def leave(self, session: Session, socket: web.WebSocketResponse) -> None:
+    async def spectate(self, session: Session, socket: web.WebSocketResponse) -> None:
+        async with self.lock:
+            if session.socket is not socket:
+                return
+            self._cancel_disconnect(session)
+            if not self._make_spectator(session, "è diventato spettatore"):
+                await self._send_error(session, "Sei già spettatore.")
+                return
+            await self._broadcast()
+
+    async def claim_seat(self, session: Session, socket: web.WebSocketResponse, seat: object) -> None:
+        async with self.lock:
+            if self.closing or session.socket is not socket:
+                return
+            if type(seat) is not int or not 1 <= seat <= MAX_PLAYERS:
+                await self._send_error(session, "Posto giocatore non valido.")
+                return
+            if self._is_player(session):
+                await self._send_error(session, "Diventa prima spettatore per cambiare posto.")
+                return
+            if self.players[seat - 1] is not None:
+                await self._send_error(session, "Questo posto è già occupato.")
+                return
+            self.players[seat - 1] = session.token
+            session.seat = seat
+            if not self.started:
+                self.status = self._lobby_status()
+            await self._broadcast()
+
+    async def _expire_disconnected_player(self, token: str, generation: int, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            async with self.lock:
+                session = self.sessions.get(token)
+                if (
+                    session is None
+                    or session.disconnect_generation != generation
+                    or session.socket is not None
+                    or not self._is_player(session)
+                ):
+                    return
+                session.disconnect_task = None
+                self._make_spectator(session, f"non è rientrato entro {DISCONNECT_GRACE_SECONDS} secondi ed è diventato spettatore")
+                # ponytail: keep the token so a late reconnect remains a spectator; prune idle sessions if room churn grows.
+                await self._broadcast()
+        except asyncio.CancelledError:
+            return
+
+    async def disconnect(self, session: Session, socket: web.WebSocketResponse) -> None:
         async with self.lock:
             if session.socket is not socket:
                 return
             session.socket = None
-            was_player = session.seat is not None and self.players[session.seat - 1] == session.token
-            if was_player:
-                self.players[session.seat - 1] = None
-                session.seat = None
-                self._reset_state()
-            self.sessions.pop(session.token, None)
+            if self._is_player(session):
+                self._cancel_disconnect(session)
+                generation = session.disconnect_generation
+                session.disconnect_task = asyncio.create_task(
+                    self._expire_disconnected_player(session.token, generation, self._disconnect_delay(session))
+                )
+                self.status = f"{session.name} è disconnesso: attendo {DISCONNECT_GRACE_SECONDS} secondi per il rientro."
+            else:
+                self.sessions.pop(session.token, None)
             if not self.sessions:
                 self._reset_state()
             await self._broadcast()
@@ -345,11 +437,13 @@ class GameRoom:
         except asyncio.CancelledError:
             return
 
-    async def command(self, session: Session, action: object) -> None:
-        if not isinstance(action, str):
-            await self._send_error(session, "Comando non valido.")
-            return
+    async def command(self, session: Session, socket: web.WebSocketResponse, action: object) -> None:
         async with self.lock:
+            if session.socket is not socket:
+                return
+            if not isinstance(action, str):
+                await self._send_error(session, "Comando non valido.")
+                return
             role, _seat = self._role(session)
             if not self._team_ready():
                 await self._send_error(session, "Servono tutti e tre i giocatori per iniziare.")
@@ -413,9 +507,12 @@ class GameRoom:
 
     async def close(self) -> None:
         async with self.lock:
+            self.closing = True
             self._stop_timer()
             self._stop_feedback()
             sockets = [session.socket for session in self.sessions.values() if session.socket is not None]
+            for session in self.sessions.values():
+                self._cancel_disconnect(session)
             self.sessions.clear()
             self.players = [None] * MAX_PLAYERS
         await asyncio.gather(*(socket.close() for socket in sockets), return_exceptions=True)
@@ -440,12 +537,19 @@ async def websocket_handler(request: web.Request) -> web.StreamResponse:
     if origins and origin not in origins:
         raise web.HTTPForbidden(text="Origine non consentita")
 
-    socket = web.WebSocketResponse(heartbeat=30)
+    socket = web.WebSocketResponse(heartbeat=10, autoping=False)
     await socket.prepare(request)
     room: GameRoom = request.app["room"]
     session: Session | None = None
     try:
         async for message in socket:
+            if session is not None and session.socket is socket:
+                session.last_seen = asyncio.get_running_loop().time()
+            if message.type == WSMsgType.PING:
+                await socket.pong(message.data)
+                continue
+            if message.type == WSMsgType.PONG:
+                continue
             if message.type != WSMsgType.TEXT:
                 continue
             try:
@@ -470,10 +574,16 @@ async def websocket_handler(request: web.Request) -> web.StreamResponse:
                 except ValueError as error:
                     await socket.send_json({"type": "error", "message": str(error)})
             elif payload.get("type") == "action":
-                await room.command(session, payload.get("action"))
+                await room.command(session, socket, payload.get("action"))
+            elif payload.get("type") == "spectate":
+                await room.spectate(session, socket)
+            elif payload.get("type") == "claim-seat":
+                await room.claim_seat(session, socket, payload.get("seat"))
+            else:
+                await socket.send_json({"type": "error", "message": "Messaggio sconosciuto."})
     finally:
         if session is not None:
-            await room.leave(session, socket)
+            await room.disconnect(session, socket)
     return socket
 
 
@@ -497,11 +607,26 @@ def create_app() -> web.Application:
 
 
 async def self_check() -> None:
+    class TestSocket:
+        def __init__(self) -> None:
+            self.closed = False
+            self.messages: list[dict[str, object]] = []
+
+        async def send_json(self, payload: dict[str, object]) -> None:
+            self.messages.append(payload)
+
+        async def close(self, *_args: object, **_kwargs: object) -> None:
+            self.closed = True
+
     room = GameRoom(words=["uno"], double_words=["due"])
-    controller = Session("controller", "Ada", seat=1)
-    helper = Session("helper", "Bruno", seat=2)
-    guesser = Session("guesser", "Clara", seat=3)
-    spectator = Session("spectator", "Dino")
+    controller_socket = TestSocket()
+    helper_socket = TestSocket()
+    guesser_socket = TestSocket()
+    spectator_socket = TestSocket()
+    controller = Session("controller", "Ada", seat=1, socket=controller_socket)  # type: ignore[arg-type]
+    helper = Session("helper", "Bruno", seat=2, socket=helper_socket)  # type: ignore[arg-type]
+    guesser = Session("guesser", "Clara", seat=3, socket=guesser_socket)  # type: ignore[arg-type]
+    spectator = Session("spectator", "Dino", socket=spectator_socket)  # type: ignore[arg-type]
     room.sessions = {session.token: session for session in (controller, helper, guesser, spectator)}
     room.players = [controller.token, helper.token, guesser.token]
 
@@ -510,17 +635,20 @@ async def self_check() -> None:
     assert room._role(controller) == ("controller", 1)
     assert room._role(helper) == ("helper", 2)
     assert room._role(guesser) == ("guesser", 3)
-    await room.command(helper, "space")
+    controller.last_seen = asyncio.get_running_loop().time() - 10
+    assert 19 <= room._disconnect_delay(controller) <= 20
+    controller.last_seen = None
+    await room.command(helper, helper_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "idle"
-    await room.command(controller, "space")
+    await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "running" and room.word == "uno"
     assert room._snapshot(controller)["room"]["word"] == "uno"
     assert room._snapshot(helper)["room"]["word"] == "uno"
     assert room._snapshot(guesser)["room"]["word"] is None
     assert room._snapshot(spectator)["room"]["word"] is None
-    await room.command(controller, "space")
+    await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "stopped"
-    await room.command(controller, "correct")
+    await room.command(controller, controller_socket, "correct")  # type: ignore[arg-type]
     assert room.score == 1 and room.correct == 1 and room.feedback == "correct"
     room._stop_feedback()
     room._ready_for_next_word()
@@ -528,13 +656,47 @@ async def self_check() -> None:
     assert room.round == 2 and room._role(controller) == ("guesser", 1)
     assert room._role(helper) == ("controller", 2)
     assert room._role(guesser) == ("helper", 3)
-    await room.command(guesser, "space")
+    await room.command(guesser, guesser_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "idle"
-    await room.command(helper, "space")
+    await room.command(helper, helper_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "running"
     assert room._snapshot(controller)["room"]["word"] is None
     room._finish()
     assert room.round == 3 and room._role(controller) == ("controller", 1)
+
+    await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
+    assert room.started and room.phase == "running"
+    await room.spectate(controller, controller_socket)  # type: ignore[arg-type]
+    assert controller.seat is None and room.players[0] is None
+    assert not room.started and room.phase == "idle" and room.score == 0
+    assert room._snapshot(controller)["room"]["word"] is None
+    await room.claim_seat(controller, controller_socket, 1)  # type: ignore[arg-type]
+    assert controller.seat == 1 and room.players[0] == controller.token
+    await room.claim_seat(spectator, spectator_socket, 1)  # type: ignore[arg-type]
+    assert spectator.seat is None and room.players[0] == controller.token
+
+    await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
+    assert room.phase == "running"
+    await room.disconnect(controller, controller_socket)  # type: ignore[arg-type]
+    assert controller.seat == 1 and controller.disconnect_task is not None
+    reconnect_socket = TestSocket()
+    await room.join(reconnect_socket, "Ada", controller.token, 3)  # type: ignore[arg-type]
+    assert controller.socket is reconnect_socket and controller.seat == 1 and room.phase == "running"
+    assert controller.disconnect_task is None
+    assert "è rientrato" in room.status
+
+    room.disconnect_grace_seconds = 0
+    await room.disconnect(controller, reconnect_socket)  # type: ignore[arg-type]
+    await asyncio.sleep(0.01)
+    assert controller.seat is None and room.players[0] is None
+    assert not room.started and room.phase == "idle" and room.score == 0
+    late_socket = TestSocket()
+    await room.join(late_socket, "Ada", controller.token, 1)  # type: ignore[arg-type]
+    assert controller.seat is None and room._role(controller)[0] == "spectator"
+    await room.command(controller, reconnect_socket, "space")  # type: ignore[arg-type]
+    assert room.phase == "idle"
+    await room.claim_seat(controller, late_socket, 1)  # type: ignore[arg-type]
+    assert controller.seat == 1 and room.players[0] == controller.token
     await room.close()
 
 
