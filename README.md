@@ -23,6 +23,20 @@ Per fermarlo:
 docker compose down
 ```
 
+## Deploy via SSH
+
+Con Docker e Docker Compose già installati sull'OptiPlex, lo script trasferisce
+solo il contesto necessario alla build, lo salva in `~/intesa-vincente` sul
+server e avvia l'aggiornamento senza cancellare il volume dei record:
+
+```bash
+./deploy-ssh.sh jack@192.168.1.10
+```
+
+Puoi anche eseguirlo senza argomenti: chiederà IP o `utente@IP`. Per una porta
+SSH non standard usa, ad esempio, `SSH_PORT=2222 ./deploy-ssh.sh jack@192.168.1.10`.
+Un eventuale file remoto `.env` non viene sovrascritto.
+
 In alternativa, senza Compose:
 
 ```bash
