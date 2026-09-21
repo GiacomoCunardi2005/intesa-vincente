@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from ipaddress import ip_address
 import json
 import math
 import os
@@ -13,6 +14,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
 
@@ -586,6 +588,17 @@ def allowed_origins() -> set[str]:
     return {origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()}
 
 
+def origin_is_allowed(origin: str | None, scheme: str, host: str, origins: set[str]) -> bool:
+    if not origins or origin in origins:
+        return True
+    parsed = urlsplit(origin or "")
+    try:
+        ip_address(parsed.hostname or "")
+    except ValueError:
+        return False
+    return origin == f"{scheme}://{host}"
+
+
 async def home(_request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB / "index.html")
 
@@ -598,7 +611,7 @@ async def health(request: web.Request) -> web.Response:
 async def websocket_handler(request: web.Request) -> web.StreamResponse:
     origins = allowed_origins()
     origin = request.headers.get("Origin")
-    if origins and origin not in origins:
+    if not origin_is_allowed(origin, request.scheme, request.host, origins):
         raise web.HTTPForbidden(text="Origine non consentita")
 
     socket = web.WebSocketResponse(heartbeat=10, autoping=False)
@@ -698,6 +711,11 @@ async def self_check() -> None:
 
     assert seat_for_initial_role("controller") == 1
     assert seat_for_initial_role("spectator") is None
+    origins = {"https://intesa.cunardi.com"}
+    assert origin_is_allowed("https://intesa.cunardi.com", "http", "192.168.1.10:5522", origins)
+    assert origin_is_allowed("http://192.168.1.10:5522", "http", "192.168.1.10:5522", origins)
+    assert not origin_is_allowed("http://192.168.1.11:5522", "http", "192.168.1.10:5522", origins)
+    assert not origin_is_allowed("https://example.com", "https", "intesa.cunardi.com", origins)
     assert room._role(controller) == ("controller", 1)
     assert room._role(helper) == ("helper", 2)
     assert room._role(guesser) == ("guesser", 3)

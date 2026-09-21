@@ -59,8 +59,9 @@ intesa.cunardi.com {
 }
 ```
 
-Per una prova diretta tramite IP/porta, imposta prima l'origine del browser,
-ad esempio:
+Per una prova diretta tramite IP/porta, ad esempio
+`http://192.168.1.10:5522`, il server accetta automaticamente la stessa
+origine IP. Per un hostname diverso aggiungilo esplicitamente, ad esempio:
 
 ```bash
 ALLOWED_ORIGINS=http://192.168.1.10:5522 docker compose up -d --build
