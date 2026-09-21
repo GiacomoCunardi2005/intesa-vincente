@@ -141,6 +141,22 @@ kbd { display: block; margin-bottom: 4px; color: #ffe45b; font-size: .65rem; }
 
 .spectators span { color: #ffe45b; font-size: 1.35rem; }
 
+.records { margin-top: 19px; border-top: 1px solid #405ba7; padding-top: 16px; }
+
+.records h2 { margin-bottom: 10px; }
+
+.records-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+
+.records-list li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-radius: 9px; background: #172d70; padding: 8px; font-family: system-ui, sans-serif; font-size: .8rem; }
+
+.record-rank { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; background: #ffe45b; color: #172451; font-weight: 800; }
+
+.record-team { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.record-score { color: #ffe45b; font-weight: 800; white-space: nowrap; }
+
+.records-list .record-empty { display: block; color: #c4cef0; background: transparent; padding: 0; }
+
 .roster-note { margin-bottom: 0; font-size: .83rem; line-height: 1.45; }
 
 .rules-dialog { width: min(720px, calc(100% - 24px)); border: 1px solid #4b64b0; border-radius: 16px; background: #101f52; color: #fff; padding: 22px; }
@@ -170,6 +186,7 @@ kbd { display: block; margin-bottom: 4px; color: #ffe45b; font-size: .65rem; }
   .player-list { grid-column: 1; }
   .spectators { grid-column: 2; grid-row: 2; }
   .roster-note { grid-column: 2; grid-row: 3; max-width: 240px; }
+  .records { grid-column: 1 / -1; grid-row: 4; }
 }
 
 @media (max-width: 580px) {

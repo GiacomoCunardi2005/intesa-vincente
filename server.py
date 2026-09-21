@@ -10,6 +10,7 @@ import os
 import random
 import secrets
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,9 +22,11 @@ RES = ROOT / "res"
 WEB = ROOT / "web"
 MAX_PLAYERS = 3
 ROUND_SECONDS = 60
+MAX_TURNS = 3
 FEEDBACK_SECONDS = 0.54
 DISCONNECT_GRACE_SECONDS = 30
 INITIAL_ROLE_SEATS = {"controller": 1, "helper": 2, "guesser": 3}
+RECORDS_PATH = Path(os.getenv("RECORDS_PATH", str(ROOT / "data" / "records.json")))
 
 
 def read_words(path: Path) -> list[str]:
@@ -43,6 +46,36 @@ def score_after_answer(score: int, correct: bool, doubled: bool) -> int:
 
 def clean_name(value: object) -> str:
     return " ".join(str(value).split())[:24]
+
+
+def ordered_records(records: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    return sorted(records, key=lambda record: (-record[1], record[0].casefold()))
+
+
+def read_records(path: Path) -> list[tuple[str, int]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    records: list[tuple[str, int]] = []
+    for record in payload:
+        if not isinstance(record, dict):
+            continue
+        team = " ".join(record.get("team", "").split()) if isinstance(record.get("team"), str) else ""
+        correct = record.get("correct")
+        if team and type(correct) is int and correct >= 0:
+            records.append((team[:78], correct))
+    return ordered_records(records)
+
+
+def write_records(path: Path, records: list[tuple[str, int]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    payload = [{"team": team, "correct": correct} for team, correct in records]
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 def seat_for_initial_role(value: object) -> int | None:
@@ -67,9 +100,16 @@ class Session:
 class GameRoom:
     """Una squadra da tre: due suggeritori e un indovino a ruoli rotanti."""
 
-    def __init__(self, words: list[str] | None = None, double_words: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        words: list[str] | None = None,
+        double_words: list[str] | None = None,
+        records_path: Path | None = None,
+    ) -> None:
         self.words = words if words is not None else read_words(RES / "parole.txt")
         self.double_words = double_words if double_words is not None else read_words(RES / "paroleRaddoppio.txt")
+        self.records_path = records_path or RECORDS_PATH
+        self.records = read_records(self.records_path)
         self.rng = random.SystemRandom()
         self.sessions: dict[str, Session] = {}
         self.players: list[str | None] = [None] * MAX_PLAYERS
@@ -193,7 +233,9 @@ class GameRoom:
         role, seat = self._role(session)
         can_control = role == "controller" and self._team_ready()
         can_see_word = role in {"controller", "helper"}
-        if self._active_word():
+        if self.phase == "finished":
+            visible_word = "Partita conclusa"
+        elif self._active_word():
             visible_word = self.word if can_see_word else None
         else:
             visible_word = "Premi Spazio" if can_see_word else None
@@ -234,6 +276,7 @@ class GameRoom:
                 "passes": self.passes,
                 "doubles": self.doubles,
                 "round": self.round,
+                "records": [{"team": team, "correct": correct} for team, correct in self.records],
                 "word": visible_word,
                 "word_hidden": self._active_word() and not can_see_word,
                 "feedback": self.feedback,
@@ -387,6 +430,8 @@ class GameRoom:
             return
 
     def _finish(self) -> None:
+        if self.phase == "finished":
+            return
         self._stop_timer()
         self._stop_feedback()
         self.phase = "idle"
@@ -394,9 +439,28 @@ class GameRoom:
         self.active_double = False
         self.feedback = "normal"
         self.word = ""
+        if self.round >= MAX_TURNS:
+            self.phase = "finished"
+            self.remaining = 0
+            saved = self._save_record()
+            self.status = f"Tempo scaduto. Partita finita: {self.correct} parole indovinate in {MAX_TURNS} turni."
+            self.status += " Record salvato." if saved else " Impossibile salvare il record."
+            return
         self.round += 1
         self.guesser_seat = self.guesser_seat % MAX_PLAYERS + 1
         self.status = f"Tempo scaduto. Turno {self.round}: {self._controller_name()} ha i comandi."
+
+    def _save_record(self) -> bool:
+        if not self._team_ready():
+            return False
+        team = " - ".join(self._seat_name(seat) for seat in range(1, MAX_PLAYERS + 1))
+        records = ordered_records([*self.records, (team, self.correct)])
+        try:
+            write_records(self.records_path, records)
+        except OSError:
+            return False
+        self.records = records
+        return True
 
     def _reveal_word(self, actor: str) -> None:
         doubled = self.phase == "double-ready"
@@ -618,7 +682,9 @@ async def self_check() -> None:
         async def close(self, *_args: object, **_kwargs: object) -> None:
             self.closed = True
 
-    room = GameRoom(words=["uno"], double_words=["due"])
+    temporary_records = tempfile.TemporaryDirectory()
+    records_path = Path(temporary_records.name) / "records.json"
+    room = GameRoom(words=["uno"], double_words=["due"], records_path=records_path)
     controller_socket = TestSocket()
     helper_socket = TestSocket()
     guesser_socket = TestSocket()
@@ -666,9 +732,26 @@ async def self_check() -> None:
 
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.started and room.phase == "running"
+    room.correct = 15
+    room.score = 4
+    room._finish()
+    assert room.phase == "finished" and room.round == MAX_TURNS
+    assert room.records == [("Ada - Bruno - Clara", 15)]
+    assert room._snapshot(spectator)["room"]["records"] == [{"team": "Ada - Bruno - Clara", "correct": 15}]
+    saved = GameRoom(words=["uno"], double_words=["due"], records_path=records_path)
+    assert saved.records == [("Ada - Bruno - Clara", 15)]
+    await saved.close()
+    room._finish()
+    assert room.records == [("Ada - Bruno - Clara", 15)]
+    await room.command(controller, controller_socket, "restart")  # type: ignore[arg-type]
+    assert not room.started and room.phase == "idle" and room.records == [("Ada - Bruno - Clara", 15)]
+
+    await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
+    assert room.started and room.phase == "running"
     await room.spectate(controller, controller_socket)  # type: ignore[arg-type]
     assert controller.seat is None and room.players[0] is None
     assert not room.started and room.phase == "idle" and room.score == 0
+    assert room.records == [("Ada - Bruno - Clara", 15)]
     assert room._snapshot(controller)["room"]["word"] is None
     await room.claim_seat(controller, controller_socket, 1)  # type: ignore[arg-type]
     assert controller.seat == 1 and room.players[0] == controller.token
@@ -697,7 +780,12 @@ async def self_check() -> None:
     assert room.phase == "idle"
     await room.claim_seat(controller, late_socket, 1)  # type: ignore[arg-type]
     assert controller.seat == 1 and room.players[0] == controller.token
+    write_records(records_path, [*room.records, ("Zeta", 18), ("Alfa", 18)])
+    reloaded = GameRoom(words=["uno"], double_words=["due"], records_path=records_path)
+    assert reloaded.records == [("Alfa", 18), ("Zeta", 18), ("Ada - Bruno - Clara", 15)]
+    await reloaded.close()
     await room.close()
+    temporary_records.cleanup()
 
 
 def main() -> None:

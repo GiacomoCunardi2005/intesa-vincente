@@ -4,7 +4,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOST=0.0.0.0 \
-    PORT=5522
+    PORT=5522 \
+    RECORDS_PATH=/data/records.json
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
@@ -16,7 +17,7 @@ COPY res/img ./res/img
 COPY res/lemon_milk ./res/lemon_milk
 COPY res/sounds ./res/sounds
 
-RUN useradd --create-home --uid 10001 app && chown -R app:app /app
+RUN useradd --create-home --uid 10001 app && mkdir -p /data && chown -R app:app /app /data
 USER app
 
 EXPOSE 5522

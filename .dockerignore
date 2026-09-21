@@ -3,5 +3,6 @@ __pycache__/
 *.py[cod]
 .venv/
 graphify-out/
+/data/
 intesa_vincente.py
 L'intesa vincente.jar

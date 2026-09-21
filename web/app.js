@@ -20,6 +20,7 @@ const playerList = $("#player-list");
 const spectateButton = $("#spectate-button");
 const claimSeatActions = $("#claim-seat-actions");
 const spectators = $("#spectators");
+const recordsList = $("#records-list");
 const helpButton = $("#help-button");
 const restartButton = $("#restart-button");
 const rulesDialog = $("#rules-dialog");
@@ -194,6 +195,31 @@ function renderMembership(room, you) {
   });
 }
 
+function renderRecords(records) {
+  const rows = Array.isArray(records) ? records : [];
+  if (!rows.length) {
+    const empty = document.createElement("li");
+    empty.className = "record-empty";
+    empty.textContent = "Nessun record ancora.";
+    recordsList.replaceChildren(empty);
+    return;
+  }
+  recordsList.replaceChildren(...rows.map((record, index) => {
+    const item = document.createElement("li");
+    const rank = document.createElement("span");
+    const team = document.createElement("strong");
+    const correct = document.createElement("span");
+    rank.className = "record-rank";
+    team.className = "record-team";
+    correct.className = "record-score";
+    rank.textContent = index + 1;
+    team.textContent = typeof record?.team === "string" ? record.team : "Squadra";
+    correct.textContent = `${Number.isInteger(record?.correct) ? record.correct : 0} giuste`;
+    item.append(rank, team, correct);
+    return item;
+  }));
+}
+
 function render() {
   const { you, room } = roomState;
   const canControl = you.can_control === true;
@@ -218,6 +244,7 @@ function render() {
   statWrong.textContent = room.wrong;
   statPasses.textContent = `${room.passes} / 3`;
   statDoubles.textContent = `${room.doubles} / 2`;
+  renderRecords(room.records);
   playerList.replaceChildren(...room.players.map((player, index) => {
     const item = document.createElement("li");
     const seat = document.createElement("span");

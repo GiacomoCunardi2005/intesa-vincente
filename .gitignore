@@ -3,5 +3,7 @@ __pycache__/
 .venv/
 .env
 graphify-out/
+/data/records.json
+/data/.records.json.tmp
 intesa_vincente.py
 L'intesa vincente.jar

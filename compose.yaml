@@ -7,4 +7,9 @@ services:
       - "5522:5522"
     environment:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://intesa.cunardi.com}
+    volumes:
+      - intesa-records:/data
     restart: unless-stopped
+
+volumes:
+  intesa-records:

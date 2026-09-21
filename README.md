@@ -4,8 +4,9 @@ Repository della sola versione multiplayer web: server Python, interfaccia,
 liste di parole, immagini, audio e font. Il vecchio gioco GTK/Python e il JAR
 Java restano locali ma non sono inclusi nel repository né nel container.
 
-La partita vive in memoria: avvia una sola istanza del container. Riavviarla
-azzera la partita attiva.
+La partita attiva vive in memoria: avvia una sola istanza del container.
+Riavviarla azzera la partita attiva, ma la classifica resta nel volume Docker
+`intesa-records` (non usare `docker compose down -v` se vuoi conservarla).
 
 ## Avvio sull'OptiPlex, porta 5522
 
@@ -28,6 +29,7 @@ In alternativa, senza Compose:
 docker build -t intesa-vincente .
 docker run -d --name intesa-vincente --restart unless-stopped \
   -p 5522:5522 \
+  -v intesa-records:/data \
   -e ALLOWED_ORIGINS=https://intesa.cunardi.com \
   intesa-vincente
 ```
