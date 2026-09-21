@@ -319,6 +319,7 @@ window.addEventListener("keydown", (event) => {
     Backspace: "wrong",
     KeyP: "pass",
     KeyR: "double",
+    KeyN: "restart",
   }[event.code];
   if (!action) return;
   event.preventDefault();
