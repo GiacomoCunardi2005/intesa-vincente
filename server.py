@@ -646,8 +646,8 @@ class GameRoom:
                         self.phase = "idle"
                         self.status = f"{actor} ha usato il passo {self.passes}/3."
             elif action == "double":
-                if self.phase != "idle":
-                    await self._send_error(session, "Il raddoppio si sceglie prima della parola.")
+                if self.phase not in ("idle", "feedback"):
+                    await self._send_error(session, "Il raddoppio si sceglie tra una parola e l'altra.")
                     return
                 if self.score < 2:
                     await self._send_error(session, "Servono almeno 2 punti per il raddoppio.")
@@ -655,6 +655,7 @@ class GameRoom:
                 if self.doubles >= 2:
                     await self._send_error(session, "I due raddoppi sono già stati usati.")
                     return
+                self._stop_feedback()
                 self.doubles += 1
                 self.phase = "double-ready"
                 self.status = f"{actor} ha scelto il raddoppio — premi Spazio per la frase."
@@ -850,8 +851,15 @@ async def self_check() -> None:
     await asyncio.sleep(FEEDBACK_SECONDS + 0.1)
     assert room.phase == "running"
     assert room._snapshot(guesser)["room"]["word"] is None
+    room._stop_timer()
+    room.phase = "feedback"
+    room.score = 2
+    await room.command(controller, controller_socket, "double")  # type: ignore[arg-type]
+    assert room.phase == "double-ready" and room.doubles == 1
+    await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
+    assert room.phase == "running" and room.active_double and room.word == "due"
     room._finish(pending_answer=True)
-    assert room.phase == "round-ended" and room.word == "uno" and room.passes == 0
+    assert room.phase == "round-ended" and room.word == "due" and room.passes == 0
     await room.command(controller, controller_socket, "correct")  # type: ignore[arg-type]
     assert room.phase == "round-ready"
     await room.command(controller, controller_socket, "next-round")  # type: ignore[arg-type]

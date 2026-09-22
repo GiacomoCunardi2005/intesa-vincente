@@ -194,7 +194,7 @@ function canUse(action, room, you) {
   if (["correct", "wrong"].includes(action)) return ["stopped", "round-ended"].includes(room.phase);
   if (action === "next-round") return room.phase === "round-ready";
   if (action === "pass") return ["running", "stopped"].includes(room.phase);
-  if (action === "double") return room.phase === "idle" && room.score >= 2 && room.doubles < 2;
+  if (action === "double") return ["idle", "feedback"].includes(room.phase) && room.score >= 2 && room.doubles < 2;
   return true;
 }
 
