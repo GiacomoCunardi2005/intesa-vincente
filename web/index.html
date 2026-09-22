@@ -57,16 +57,28 @@
             <div class="controls-heading">
               <div>
                 <h2 id="controls-title">Comandi del suggeritore</h2>
-                <p>Solo tu puoi avviare, fermare e convalidare la parola in questo turno.</p>
+                <p>Solo tu puoi avviare e convalidare la parola; l’indovino ferma il tempo.</p>
               </div>
             </div>
             <div id="controls" class="controls">
-              <button type="button" data-action="space"><kbd>Spazio</kbd> Avvia / ferma il tempo</button>
+              <button type="button" data-action="space"><kbd>Spazio</kbd> Avvia il tempo</button>
               <button type="button" data-action="correct"><kbd>Invio</kbd> Giusta</button>
               <button type="button" data-action="wrong"><kbd>Backspace</kbd> Errore</button>
               <button type="button" data-action="pass"><kbd>P</kbd> Passa</button>
               <button type="button" data-action="double"><kbd>R</kbd> Raddoppio</button>
               <button type="button" data-action="restart"><kbd>N</kbd> Ricomincia</button>
+            </div>
+          </section>
+
+          <section id="stop-panel" class="panel controls-panel" aria-labelledby="stop-title" hidden>
+            <div class="controls-heading">
+              <div>
+                <h2 id="stop-title">Comando dell’indovino</h2>
+                <p>Quando hai una risposta, ferma il tempo.</p>
+              </div>
+            </div>
+            <div class="controls">
+              <button type="button" data-action="space"><kbd>Spazio</kbd> Ferma il tempo</button>
             </div>
           </section>
 
@@ -116,7 +128,7 @@
     <dialog id="rules-dialog" class="rules-dialog" aria-labelledby="rules-title">
       <form method="dialog" class="dialog-top"><button aria-label="Chiudi istruzioni">×</button></form>
       <h2 id="rules-title">Come si gioca online</h2>
-      <p class="rules-note">Il suggeritore con comandi gestisce i tasti. L’altro suggeritore vede la parola; l’indovino no.</p>
+      <p class="rules-note">Il suggeritore con comandi avvia e convalida. L’altro suggeritore vede la parola; l’indovino la ferma con Spazio ma non la vede.</p>
       <img id="rule-image" src="/assets/img/info1.jpg" alt="Istruzioni di gioco, pagina 1">
       <div class="dialog-actions">
         <button id="previous-rule" type="button">Indietro</button>

@@ -472,7 +472,7 @@ class GameRoom:
         self.word = self._pick_word(words, used)
         self.phase = "running"
         self.started = True
-        self.status = f"{actor} ha avviato la parola — Spazio per fermare il tempo."
+        self.status = f"{actor} ha avviato la parola — l'indovino preme Spazio per fermare il tempo."
         self._start_timer()
 
     def _answer(self, correct: bool, actor: str, status: str | None = None) -> None:
@@ -514,7 +514,8 @@ class GameRoom:
             if not self._team_ready():
                 await self._send_error(session, "Servono tutti e tre i giocatori per iniziare.")
                 return
-            if role != "controller":
+            can_stop_time = action == "space" and self.phase == "running" and role == "guesser"
+            if role != "controller" and not can_stop_time:
                 await self._send_error(session, f"In questo turno comanda solo {self._controller_name()}.")
                 return
             if self._sync_clock():
@@ -530,6 +531,9 @@ class GameRoom:
                 if self.phase in ("idle", "double-ready"):
                     self._reveal_word(actor)
                 elif self.phase == "running":
+                    if role != "guesser":
+                        await self._send_error(session, "Durante il tempo può fermare solo l'indovino.")
+                        return
                     self._stop_timer()
                     self.phase = "stopped"
                     self.status = f"{actor} ha fermato il tempo — scegli la risposta."
@@ -731,6 +735,8 @@ async def self_check() -> None:
     assert room._snapshot(guesser)["room"]["word"] is None
     assert room._snapshot(spectator)["room"]["word"] is None
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
+    assert room.phase == "running"
+    await room.command(guesser, guesser_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "stopped"
     await room.command(controller, controller_socket, "correct")  # type: ignore[arg-type]
     assert room.score == 1 and room.correct == 1 and room.feedback == "correct"

@@ -16,6 +16,7 @@ const roleHint = $("#role-hint");
 const notice = $("#notice");
 const joinNotice = $("#join-notice");
 const controlsPanel = $("#controls-panel");
+const stopPanel = $("#stop-panel");
 const playerList = $("#player-list");
 const spectateButton = $("#spectate-button");
 const claimSeatActions = $("#claim-seat-actions");
@@ -145,9 +146,14 @@ function connect(name, initialRole) {
   socket.addEventListener("error", () => setConnection("Connessione non disponibile"));
 }
 
-function canUse(action, room, canControl) {
+function canUse(action, room, you) {
+  const canControl = you.can_control === true;
+  if (action === "space") {
+    return room.phase === "running"
+      ? you.role === "guesser"
+      : canControl && ["idle", "double-ready"].includes(room.phase);
+  }
   if (!canControl) return false;
-  if (action === "space") return ["idle", "double-ready", "running"].includes(room.phase);
   if (["correct", "wrong", "pass"].includes(action)) return room.phase === "stopped";
   if (action === "double") return room.phase === "idle" && room.score >= 2 && room.doubles < 2;
   return true;
@@ -156,7 +162,7 @@ function canUse(action, room, canControl) {
 function describeRole(role) {
   if (role === "controller") return "Vedi la parola e gestisci tutti i comandi della squadra.";
   if (role === "helper") return "Vedi la parola e dai gli indizi alternandoti al suggeritore con comandi.";
-  if (role === "guesser") return "Non ricevi la parola: ascolta gli indizi e prova a indovinare.";
+  if (role === "guesser") return "Non ricevi la parola: ascolta gli indizi e premi Spazio per fermare il tempo.";
   return "Segui la partita e le statistiche della squadra in tempo reale.";
 }
 
@@ -234,6 +240,7 @@ function render() {
   roleBadge.textContent = roleLabels[you.role] || "Spettatore";
   roleHint.textContent = describeRole(you.role);
   controlsPanel.hidden = !canControl;
+  stopPanel.hidden = !(you.role === "guesser" && room.phase === "running");
   renderMembership(room, you);
   spectators.textContent = room.spectators;
   helpButton.hidden = room.started;
@@ -259,7 +266,7 @@ function render() {
     return item;
   }));
   actionButtons.forEach((button) => {
-    button.disabled = !canUse(button.dataset.action, room, canControl);
+    button.disabled = !canUse(button.dataset.action, room, you);
   });
 }
 
@@ -312,7 +319,7 @@ nextRule.addEventListener("click", () => { currentRule += 1; updateRule(); });
 window.addEventListener("keydown", (event) => {
   const target = event.target;
   if (target instanceof HTMLElement && target.closest("input, textarea, select, button, dialog")) return;
-  if (!roomState?.you.can_control || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (!roomState || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
   const action = {
     Space: "space",
     Enter: "correct",
@@ -322,8 +329,10 @@ window.addEventListener("keydown", (event) => {
     KeyN: "restart",
   }[event.code];
   if (!action) return;
-  event.preventDefault();
-  if (canUse(action, roomState.room, true)) sendAction(action);
+  if (canUse(action, roomState.room, roomState.you)) {
+    event.preventDefault();
+    sendAction(action);
+  }
 });
 
 updateRule();
