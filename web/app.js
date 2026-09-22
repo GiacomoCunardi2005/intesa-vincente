@@ -188,7 +188,8 @@ function canUse(action, room, you) {
   }
   if (!canControl) return false;
   if (action === "finish") return room.started && room.phase !== "finished";
-  if (["correct", "wrong"].includes(action)) return room.phase === "stopped";
+  if (["correct", "wrong"].includes(action)) return ["stopped", "round-ended"].includes(room.phase);
+  if (action === "next-round") return room.phase === "round-ready";
   if (action === "pass") return ["running", "stopped"].includes(room.phase);
   if (action === "double") return room.phase === "idle" && room.score >= 2 && room.doubles < 2;
   return true;
@@ -366,6 +367,7 @@ window.addEventListener("keydown", (event) => {
     Backspace: "wrong",
     KeyP: "pass",
     KeyR: "double",
+    KeyN: "next-round",
     KeyF: "finish",
   }[event.code];
   if (!action) return;

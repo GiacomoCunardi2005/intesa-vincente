@@ -172,6 +172,7 @@ class GameRoom:
         self.passes = 0
         self.doubles = 0
         self.round = 1
+        self.round_complete = False
         self.guesser_seat = 3
         self.active_double = False
         self.started = False
@@ -428,7 +429,7 @@ class GameRoom:
         self.remaining = max(0, math.ceil(self.deadline - now))
         if self.remaining:
             return False
-        self._finish()
+        self._finish(pending_answer=True)
         return True
 
     def _start_timer(self) -> None:
@@ -452,18 +453,27 @@ class GameRoom:
         except asyncio.CancelledError:
             return
 
-    def _finish(self, actor: str | None = None) -> None:
+    def _finish(self, actor: str | None = None, pending_answer: bool = False) -> None:
         if self.phase == "finished":
             return
         self._stop_timer()
         self._stop_feedback()
         self._stop_reveal()
+        if pending_answer:
+            self.phase = "round-ended"
+            self.remaining = 0
+            self.passes = 0
+            self.feedback = "normal"
+            self.round_complete = True
+            self.status = "Tempo scaduto — convalida l'ultima risposta."
+            return
         self.phase = "idle"
         self.remaining = ROUND_SECONDS
         self.active_double = False
         self.feedback = "normal"
         self.word = ""
         self.passes = 0
+        self.round_complete = False
         if actor is not None or self.round >= MAX_TURNS:
             self.phase = "finished"
             self.remaining = 0
@@ -508,6 +518,14 @@ class GameRoom:
         self.correct += int(correct)
         self.wrong += int(not correct)
         self.active_double = False
+        if self.round_complete:
+            if self.round >= MAX_TURNS:
+                self._finish()
+            else:
+                self.phase = "round-ready"
+                self.feedback = "correct" if correct else "wrong"
+                self.status = f"{actor}: risposta {'giusta' if correct else 'errata'}. Premi Round successivo."
+            return
         self.phase = "feedback"
         self.feedback = "correct" if correct else "wrong"
         self.status = status or f"{actor}: risposta {'giusta' if correct else 'errata'}."
@@ -592,10 +610,23 @@ class GameRoom:
                     await self._send_error(session, "Questo comando non è disponibile ora.")
                     return
             elif action in ("correct", "wrong"):
-                if self.phase != "stopped":
+                if self.phase not in ("stopped", "round-ended"):
                     await self._send_error(session, "Ferma prima il tempo.")
                     return
                 self._answer(action == "correct", actor)
+            elif action == "next-round":
+                if self.phase != "round-ready":
+                    await self._send_error(session, "Convalida prima l'ultima risposta.")
+                    return
+                self._stop_reveal()
+                self.round += 1
+                self.guesser_seat = self.guesser_seat % MAX_PLAYERS + 1
+                self.round_complete = False
+                self.phase = "idle"
+                self.remaining = ROUND_SECONDS
+                self.feedback = "normal"
+                self.word = ""
+                self.status = f"Turno {self.round}: {self._controller_name()} ha i comandi."
             elif action == "pass":
                 if self.phase not in ("running", "stopped"):
                     await self._send_error(session, "Il passo è disponibile solo durante una parola.")
@@ -819,8 +850,12 @@ async def self_check() -> None:
     await asyncio.sleep(FEEDBACK_SECONDS + 0.1)
     assert room.phase == "running"
     assert room._snapshot(guesser)["room"]["word"] is None
-    room._finish()
-    assert room.round == 2 and room.passes == 0 and room._role(controller) == ("guesser", 1)
+    room._finish(pending_answer=True)
+    assert room.phase == "round-ended" and room.word == "uno" and room.passes == 0
+    await room.command(controller, controller_socket, "correct")  # type: ignore[arg-type]
+    assert room.phase == "round-ready"
+    await room.command(controller, controller_socket, "next-round")  # type: ignore[arg-type]
+    assert room.round == 2 and room._role(controller) == ("guesser", 1)
     assert room._role(helper) == ("controller", 2)
     assert room._role(guesser) == ("helper", 3)
     await room.command(guesser, guesser_socket, "space")  # type: ignore[arg-type]
