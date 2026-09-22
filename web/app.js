@@ -10,6 +10,7 @@ const word = $("#word");
 const timer = $("#timer");
 const score = $("#score");
 const status = $("#status");
+const timeAlert = $("#time-alert");
 const wordFrame = $("#word-frame");
 const roleBadge = $("#role-badge");
 const roleHint = $("#role-hint");
@@ -272,6 +273,8 @@ function render() {
   timer.textContent = room.remaining;
   score.textContent = room.score;
   status.textContent = room.status;
+  timeAlert.textContent = room.phase === "running" ? "VIA AL TEMPO" : ["stopped", "round-ended"].includes(room.phase) ? "STOP AL TEMPO" : "";
+  timeAlert.hidden = !timeAlert.textContent;
   wordFrame.src = `/assets/img/${frames[room.feedback] || frames.normal}`;
   roleBadge.textContent = roleLabels[you.role] || "Spettatore";
   roleHint.textContent = describeRole(you.role);
