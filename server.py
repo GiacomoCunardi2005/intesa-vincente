@@ -546,17 +546,22 @@ class GameRoom:
                     return
                 self._answer(action == "correct", actor)
             elif action == "pass":
-                if self.phase != "stopped":
-                    await self._send_error(session, "Il passo è disponibile solo a tempo fermo.")
+                if self.phase not in ("running", "stopped"):
+                    await self._send_error(session, "Il passo è disponibile solo durante una parola.")
                     return
                 self.active_double = False
                 if self.passes >= 3:
+                    self._stop_timer()
                     self._answer(False, actor, "Passi terminati: errore.")
                 else:
                     self.passes += 1
-                    self.word = ""
-                    self.phase = "idle"
-                    self.status = f"{actor} ha usato il passo {self.passes}/3."
+                    if self.phase == "running":
+                        self.word = self._pick_word(self.words, self.used_words)
+                        self.status = f"{actor} ha usato il passo {self.passes}/3 — tempo in corso."
+                    else:
+                        self.word = ""
+                        self.phase = "idle"
+                        self.status = f"{actor} ha usato il passo {self.passes}/3."
             elif action == "double":
                 if self.phase != "idle":
                     await self._send_error(session, "Il raddoppio si sceglie prima della parola.")
@@ -734,6 +739,9 @@ async def self_check() -> None:
     assert room._snapshot(helper)["room"]["word"] == "uno"
     assert room._snapshot(guesser)["room"]["word"] is None
     assert room._snapshot(spectator)["room"]["word"] is None
+    deadline = room.deadline
+    await room.command(controller, controller_socket, "pass")  # type: ignore[arg-type]
+    assert room.phase == "running" and room.passes == 1 and room.word == "uno" and room.deadline == deadline
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "running"
     await room.command(guesser, guesser_socket, "space")  # type: ignore[arg-type]

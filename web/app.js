@@ -154,7 +154,8 @@ function canUse(action, room, you) {
       : canControl && ["idle", "double-ready"].includes(room.phase);
   }
   if (!canControl) return false;
-  if (["correct", "wrong", "pass"].includes(action)) return room.phase === "stopped";
+  if (["correct", "wrong"].includes(action)) return room.phase === "stopped";
+  if (action === "pass") return ["running", "stopped"].includes(room.phase);
   if (action === "double") return room.phase === "idle" && room.score >= 2 && room.doubles < 2;
   return true;
 }
