@@ -56,6 +56,8 @@ let reconnectDelay = 500;
 let reconnectTimer;
 let currentRule = 0;
 let pendingSeat;
+let actionCooldownUntil = 0;
+let actionCooldownTimer;
 
 nameInput.value = localStorage.getItem(NAME_KEY) || "";
 const savedRole = localStorage.getItem(ROLE_KEY);
@@ -265,15 +267,23 @@ function render() {
     return item;
   }));
   actionButtons.forEach((button) => {
-    button.disabled = !canUse(button.dataset.action, room, you);
+    button.disabled = Date.now() < actionCooldownUntil || !canUse(button.dataset.action, room, you);
   });
 }
 
 function sendAction(action) {
+  if (Date.now() < actionCooldownUntil) return;
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     setNotice("Connessione non disponibile.");
     return;
   }
+  actionCooldownUntil = Date.now() + 1000;
+  clearTimeout(actionCooldownTimer);
+  actionCooldownTimer = setTimeout(() => {
+    actionCooldownUntil = 0;
+    if (roomState) render();
+  }, 1000);
+  if (roomState) render();
   socket.send(JSON.stringify({ type: "action", action }));
 }
 

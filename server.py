@@ -26,6 +26,7 @@ MAX_PLAYERS = 3
 ROUND_SECONDS = 60
 MAX_TURNS = 3
 FEEDBACK_SECONDS = 2
+ACTION_COOLDOWN_SECONDS = 1
 DISCONNECT_GRACE_SECONDS = 30
 INITIAL_ROLE_SEATS = {"controller": 1, "helper": 2, "guesser": 3}
 RECORDS_PATH = Path(os.getenv("RECORDS_PATH", str(ROOT / "data" / "records.json")))
@@ -97,6 +98,7 @@ class Session:
     disconnect_task: asyncio.Task[None] | None = None
     disconnect_generation: int = 0
     last_seen: float | None = None
+    action_cooldown_until: float = 0
 
 
 class GameRoom:
@@ -119,6 +121,7 @@ class GameRoom:
         self.timer_task: asyncio.Task[None] | None = None
         self.feedback_task: asyncio.Task[None] | None = None
         self.reveal_task: asyncio.Task[None] | None = None
+        self.action_cooldown_seconds = ACTION_COOLDOWN_SECONDS
         self.disconnect_grace_seconds = DISCONNECT_GRACE_SECONDS
         self.deadline: float | None = None
         self.closing = False
@@ -557,6 +560,11 @@ class GameRoom:
                 await self._send_error(session, "Il tempo è scaduto.")
                 return
 
+            now = asyncio.get_running_loop().time()
+            if now < session.action_cooldown_until:
+                await self._send_error(session, "Attendi un secondo prima del prossimo comando.")
+                return
+
             actor = session.name
             if action == "finish":
                 if not self.started or self.phase == "finished":
@@ -615,6 +623,7 @@ class GameRoom:
             else:
                 await self._send_error(session, "Comando sconosciuto.")
                 return
+            session.action_cooldown_until = now + self.action_cooldown_seconds
             await self._broadcast()
 
     async def close(self) -> None:
@@ -776,6 +785,10 @@ async def self_check() -> None:
     assert room.phase == "idle"
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "running" and room.word == "uno"
+    await room.command(controller, controller_socket, "pass")  # type: ignore[arg-type]
+    assert room.passes == 0
+    room.action_cooldown_seconds = 0
+    controller.action_cooldown_until = 0
     assert room._snapshot(controller)["room"]["word"] == "uno"
     assert room._snapshot(helper)["room"]["word"] == "uno"
     assert room._snapshot(guesser)["room"]["word"] is None
