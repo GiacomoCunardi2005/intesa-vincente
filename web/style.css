@@ -87,8 +87,6 @@ input:not([type="radio"]) { width: 100%; min-width: 0; border: 1px solid #6079c9
 
 .help-button { justify-self: start; border: 0; border-radius: 10px; background: #3151aa; color: #fff; padding: 12px 18px; }
 
-.restart-button { left: 30.125%; top: 62.5%; width: 39.75%; height: 11.667%; }
-
 .controls-panel, .stats-panel, .roster { padding: 19px; }
 
 .controls-heading { display: flex; justify-content: space-between; align-items: start; gap: 12px; }

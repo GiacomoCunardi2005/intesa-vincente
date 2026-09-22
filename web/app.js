@@ -23,7 +23,6 @@ const claimSeatActions = $("#claim-seat-actions");
 const spectators = $("#spectators");
 const recordsList = $("#records-list");
 const helpButton = $("#help-button");
-const restartButton = $("#restart-button");
 const rulesDialog = $("#rules-dialog");
 const ruleImage = $("#rule-image");
 const rulePage = $("#rule-page");
@@ -154,6 +153,7 @@ function canUse(action, room, you) {
       : canControl && ["idle", "double-ready"].includes(room.phase);
   }
   if (!canControl) return false;
+  if (action === "finish") return room.started && room.phase !== "finished";
   if (["correct", "wrong"].includes(action)) return room.phase === "stopped";
   if (action === "pass") return ["running", "stopped"].includes(room.phase);
   if (action === "double") return room.phase === "idle" && room.score >= 2 && room.doubles < 2;
@@ -244,7 +244,6 @@ function render() {
   stopPanel.hidden = !(you.role === "guesser" && room.phase === "running");
   renderMembership(room, you);
   spectators.textContent = room.spectators;
-  restartButton.hidden = !canControl || !room.started;
   statRound.textContent = room.round;
   statScore.textContent = room.score;
   statCorrect.textContent = room.correct;
@@ -310,7 +309,6 @@ joinForm.addEventListener("submit", (event) => {
 });
 
 actionButtons.forEach((button) => button.addEventListener("click", () => sendAction(button.dataset.action)));
-restartButton.addEventListener("click", () => sendAction("restart"));
 spectateButton.addEventListener("click", () => sendMembership("spectate"));
 helpButton.addEventListener("click", () => rulesDialog.showModal());
 previousRule.addEventListener("click", () => { currentRule -= 1; updateRule(); });
@@ -326,7 +324,7 @@ window.addEventListener("keydown", (event) => {
     Backspace: "wrong",
     KeyP: "pass",
     KeyR: "double",
-    KeyN: "restart",
+    KeyF: "finish",
   }[event.code];
   if (!action) return;
   if (canUse(action, roomState.room, roomState.you)) {

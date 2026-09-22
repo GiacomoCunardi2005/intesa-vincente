@@ -443,7 +443,7 @@ class GameRoom:
         except asyncio.CancelledError:
             return
 
-    def _finish(self) -> None:
+    def _finish(self, actor: str | None = None) -> None:
         if self.phase == "finished":
             return
         self._stop_timer()
@@ -454,11 +454,14 @@ class GameRoom:
         self.active_double = False
         self.feedback = "normal"
         self.word = ""
-        if self.round >= MAX_TURNS:
+        if actor is not None or self.round >= MAX_TURNS:
             self.phase = "finished"
             self.remaining = 0
             saved = self._save_record()
-            self.status = f"Tempo scaduto. Partita finita: {self.correct} parole indovinate in {MAX_TURNS} turni."
+            if actor is None:
+                self.status = f"Tempo scaduto. Partita finita: {self.correct} parole indovinate in {MAX_TURNS} turni."
+            else:
+                self.status = f"{actor} ha concluso la partita: {self.correct} parole indovinate."
             self.status += " Record salvato." if saved else " Impossibile salvare il record."
             return
         self.round += 1
@@ -554,9 +557,11 @@ class GameRoom:
                 return
 
             actor = session.name
-            if action == "restart":
-                self._reset_state()
-                self.status = f"{actor} ha ricominciato. {self._controller_name()} ha i comandi."
+            if action == "finish":
+                if not self.started or self.phase == "finished":
+                    await self._send_error(session, "Non c'è una partita da concludere.")
+                    return
+                self._finish(actor)
             elif action == "space":
                 if self.phase in ("idle", "double-ready"):
                     self._reveal_word(actor)
@@ -815,7 +820,7 @@ async def self_check() -> None:
     await saved.close()
     room._finish()
     assert room.records == [("Ada - Bruno - Clara", 15)]
-    await room.command(controller, controller_socket, "restart")  # type: ignore[arg-type]
+    room._reset_state()
     assert not room.started and room.phase == "idle" and room.records == [("Ada - Bruno - Clara", 15)]
 
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
@@ -852,6 +857,20 @@ async def self_check() -> None:
     assert room.phase == "idle"
     await room.claim_seat(controller, late_socket, 1)  # type: ignore[arg-type]
     assert controller.seat == 1 and room.players[0] == controller.token
+
+    manual_records_path = Path(temporary_records.name) / "manual-records.json"
+    manual = GameRoom(words=["uno"], double_words=["due"], records_path=manual_records_path)
+    manual_controller_socket = TestSocket()
+    manual_controller = Session("manual-controller", "Ada", seat=1, socket=manual_controller_socket)  # type: ignore[arg-type]
+    manual_helper = Session("manual-helper", "Bruno", seat=2)  # type: ignore[arg-type]
+    manual_guesser = Session("manual-guesser", "Clara", seat=3)  # type: ignore[arg-type]
+    manual.sessions = {session.token: session for session in (manual_controller, manual_helper, manual_guesser)}
+    manual.players = [manual_controller.token, manual_helper.token, manual_guesser.token]
+    manual.started = True
+    manual.correct = 2
+    await manual.command(manual_controller, manual_controller_socket, "finish")  # type: ignore[arg-type]
+    assert manual.phase == "finished" and manual.records == [("Ada - Bruno - Clara", 2)]
+    await manual.close()
     write_records(records_path, [*room.records, ("Zeta", 18), ("Alfa", 18)])
     reloaded = GameRoom(words=["uno"], double_words=["due"], records_path=records_path)
     assert reloaded.records == [("Alfa", 18), ("Zeta", 18), ("Ada - Bruno - Clara", 15)]
