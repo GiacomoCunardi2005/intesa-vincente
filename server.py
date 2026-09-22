@@ -67,16 +67,16 @@ def read_records(path: Path) -> list[tuple[str, int]]:
         if not isinstance(record, dict):
             continue
         team = " ".join(record.get("team", "").split()) if isinstance(record.get("team"), str) else ""
-        correct = record.get("correct")
-        if team and type(correct) is int and correct >= 0:
-            records.append((team[:78], correct))
+        points = record.get("points", record.get("correct"))
+        if team and type(points) is int and points >= 0:
+            records.append((team[:78], points))
     return ordered_records(records)
 
 
 def write_records(path: Path, records: list[tuple[str, int]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
-    payload = [{"team": team, "correct": correct} for team, correct in records]
+    payload = [{"team": team, "points": points} for team, points in records]
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
 
@@ -242,7 +242,7 @@ class GameRoom:
         return True
 
     def _active_word(self) -> bool:
-        return self.phase in {"running", "stopped", "feedback"}
+        return self.phase in {"running", "stopped", "feedback", "round-ended", "round-ready"}
 
     def _snapshot(self, session: Session) -> dict[str, object]:
         role, seat = self._role(session)
@@ -300,7 +300,7 @@ class GameRoom:
                 "passes": self.passes,
                 "doubles": self.doubles,
                 "round": self.round,
-                "records": [{"team": team, "correct": correct} for team, correct in self.records],
+                "records": [{"team": team, "points": points} for team, points in self.records],
                 "word": visible_word,
                 "word_hidden": self._active_word() and not can_see_word,
                 "feedback": self.feedback,
@@ -492,7 +492,7 @@ class GameRoom:
         if not self._team_ready():
             return False
         team = " - ".join(self._seat_name(seat) for seat in range(1, MAX_PLAYERS + 1))
-        records = ordered_records([*self.records, (team, self.correct)])
+        records = ordered_records([*self.records, (team, self.score)])
         try:
             write_records(self.records_path, records)
         except OSError:
@@ -872,22 +872,22 @@ async def self_check() -> None:
     room.score = 4
     room._finish()
     assert room.phase == "finished" and room.round == MAX_TURNS
-    assert room.records == [("Ada - Bruno - Clara", 15)]
-    assert room._snapshot(spectator)["room"]["records"] == [{"team": "Ada - Bruno - Clara", "correct": 15}]
+    assert room.records == [("Ada - Bruno - Clara", 4)]
+    assert room._snapshot(spectator)["room"]["records"] == [{"team": "Ada - Bruno - Clara", "points": 4}]
     saved = GameRoom(words=["uno"], double_words=["due"], records_path=records_path)
-    assert saved.records == [("Ada - Bruno - Clara", 15)]
+    assert saved.records == [("Ada - Bruno - Clara", 4)]
     await saved.close()
     room._finish()
-    assert room.records == [("Ada - Bruno - Clara", 15)]
+    assert room.records == [("Ada - Bruno - Clara", 4)]
     room._reset_state()
-    assert not room.started and room.phase == "idle" and room.records == [("Ada - Bruno - Clara", 15)]
+    assert not room.started and room.phase == "idle" and room.records == [("Ada - Bruno - Clara", 4)]
 
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.started and room.phase == "running"
     await room.spectate(controller, controller_socket)  # type: ignore[arg-type]
     assert controller.seat is None and room.players[0] is None
     assert not room.started and room.phase == "idle" and room.score == 0
-    assert room.records == [("Ada - Bruno - Clara", 15)]
+    assert room.records == [("Ada - Bruno - Clara", 4)]
     assert room._snapshot(controller)["room"]["word"] == "Attendi gli altri giocatori"
     await room.claim_seat(controller, controller_socket, 1)  # type: ignore[arg-type]
     assert controller.seat == 1 and room.players[0] == controller.token
@@ -927,12 +927,13 @@ async def self_check() -> None:
     manual.players = [manual_controller.token, manual_helper.token, manual_guesser.token]
     manual.started = True
     manual.correct = 2
+    manual.score = 2
     await manual.command(manual_controller, manual_controller_socket, "finish")  # type: ignore[arg-type]
     assert manual.phase == "finished" and manual.records == [("Ada - Bruno - Clara", 2)]
     await manual.close()
     write_records(records_path, [*room.records, ("Zeta", 18), ("Alfa", 18)])
     reloaded = GameRoom(words=["uno"], double_words=["due"], records_path=records_path)
-    assert reloaded.records == [("Alfa", 18), ("Zeta", 18), ("Ada - Bruno - Clara", 15)]
+    assert reloaded.records == [("Alfa", 18), ("Zeta", 18), ("Ada - Bruno - Clara", 4)]
     await reloaded.close()
     await room.close()
     temporary_records.cleanup()

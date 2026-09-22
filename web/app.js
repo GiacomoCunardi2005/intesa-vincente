@@ -253,14 +253,14 @@ function renderRecords(records) {
     const item = document.createElement("li");
     const rank = document.createElement("span");
     const team = document.createElement("strong");
-    const correct = document.createElement("span");
+    const points = document.createElement("span");
     rank.className = "record-rank";
     team.className = "record-team";
-    correct.className = "record-score";
+    points.className = "record-score";
     rank.textContent = index + 1;
     team.textContent = typeof record?.team === "string" ? record.team : "Squadra";
-    correct.textContent = `${Number.isInteger(record?.correct) ? record.correct : 0} giuste`;
-    item.append(rank, team, correct);
+    points.textContent = `${Number.isInteger(record?.points) ? record.points : 0} punti`;
+    item.append(rank, team, points);
     return item;
   }));
 }
