@@ -463,6 +463,7 @@ class GameRoom:
         self.active_double = False
         self.feedback = "normal"
         self.word = ""
+        self.passes = 0
         if actor is not None or self.round >= MAX_TURNS:
             self.phase = "finished"
             self.remaining = 0
@@ -819,7 +820,7 @@ async def self_check() -> None:
     assert room.phase == "running"
     assert room._snapshot(guesser)["room"]["word"] is None
     room._finish()
-    assert room.round == 2 and room._role(controller) == ("guesser", 1)
+    assert room.round == 2 and room.passes == 0 and room._role(controller) == ("guesser", 1)
     assert room._role(helper) == ("controller", 2)
     assert room._role(guesser) == ("helper", 3)
     await room.command(guesser, guesser_socket, "space")  # type: ignore[arg-type]
