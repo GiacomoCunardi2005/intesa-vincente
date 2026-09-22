@@ -247,15 +247,21 @@ class GameRoom:
         role, seat = self._role(session)
         can_control = role == "controller" and self._team_ready()
         guesser_reveal = self.guesser_reveal if role == "guesser" else None
-        can_see_word = role in {"controller", "helper"} or guesser_reveal is not None
+        can_see_word = role in {"controller", "helper", "spectator"} or guesser_reveal is not None
         if self.phase == "finished":
             visible_word = "Partita conclusa"
         elif guesser_reveal is not None:
             visible_word = guesser_reveal
         elif self._active_word():
             visible_word = self.word if can_see_word else None
+        elif not can_see_word:
+            visible_word = None
+        elif not self._team_ready():
+            visible_word = "Attendi gli altri giocatori"
+        elif role == "controller":
+            visible_word = "Premi Spazio"
         else:
-            visible_word = "Premi Spazio" if can_see_word and self._team_ready() else "Attendi gli altri giocatori" if can_see_word else None
+            visible_word = "In attesa della prossima parola"
         roles = self._turn_roles()
         player_slots: list[dict[str, object] | None] = []
         for index, token in enumerate(self.players):
@@ -792,7 +798,7 @@ async def self_check() -> None:
     assert room._snapshot(controller)["room"]["word"] == "uno"
     assert room._snapshot(helper)["room"]["word"] == "uno"
     assert room._snapshot(guesser)["room"]["word"] is None
-    assert room._snapshot(spectator)["room"]["word"] is None
+    assert room._snapshot(spectator)["room"]["word"] == "uno"
     deadline = room.deadline
     await room.command(controller, controller_socket, "pass")  # type: ignore[arg-type]
     assert room.phase == "running" and room.passes == 1 and room.word == "uno" and room.deadline == deadline
@@ -846,7 +852,7 @@ async def self_check() -> None:
     assert controller.seat is None and room.players[0] is None
     assert not room.started and room.phase == "idle" and room.score == 0
     assert room.records == [("Ada - Bruno - Clara", 15)]
-    assert room._snapshot(controller)["room"]["word"] is None
+    assert room._snapshot(controller)["room"]["word"] == "Attendi gli altri giocatori"
     await room.claim_seat(controller, controller_socket, 1)  # type: ignore[arg-type]
     assert controller.seat == 1 and room.players[0] == controller.token
     await room.claim_seat(spectator, spectator_socket, 1)  # type: ignore[arg-type]
