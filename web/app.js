@@ -244,7 +244,6 @@ function render() {
   stopPanel.hidden = !(you.role === "guesser" && room.phase === "running");
   renderMembership(room, you);
   spectators.textContent = room.spectators;
-  helpButton.hidden = room.started;
   restartButton.hidden = !canControl || !room.started;
   statRound.textContent = room.round;
   statScore.textContent = room.score;
