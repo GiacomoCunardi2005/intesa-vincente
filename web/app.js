@@ -43,6 +43,7 @@ const ROLE_KEY = "intesa-vincente-initial-role";
 const frames = { normal: "normale.png", correct: "giusto.png", wrong: "errore.png" };
 const sounds = {
   start: "gong.wav",
+  stop: "gong.wav",
   correct: "giusto.wav",
   wrong: "errore.wav",
   pass: "raddoppio-passo.wav",
@@ -106,7 +107,8 @@ function playSound(name) {
 
 function playRoomSound(previous, room) {
   if (!previous) return;
-  if (room.feedback === "correct" && previous.feedback !== "correct") playSound("correct");
+  if (["stopped", "round-ended"].includes(room.phase) && !["stopped", "round-ended"].includes(previous.phase)) playSound("stop");
+  else if (room.feedback === "correct" && previous.feedback !== "correct") playSound("correct");
   else if (room.feedback === "wrong" && previous.feedback !== "wrong") playSound("wrong");
   else if (room.doubles > previous.doubles) playSound("double");
   else if (room.passes > previous.passes) playSound("pass");
