@@ -40,6 +40,15 @@ const TOKEN_KEY = "intesa-vincente-token";
 const NAME_KEY = "intesa-vincente-name";
 const ROLE_KEY = "intesa-vincente-initial-role";
 const frames = { normal: "normale.png", correct: "giusto.png", wrong: "errore.png" };
+const sounds = {
+  start: "gong.wav",
+  correct: "giusto.wav",
+  wrong: "errore.wav",
+  pass: "raddoppio-passo.wav",
+  double: "raddoppio-passo.wav",
+  next: "cambioParola.wav",
+  click: "click.wav",
+};
 const rules = ["info1.jpg", "info2.jpg", "info3.jpg"];
 const roleLabels = {
   controller: "Suggeritore con comandi",
@@ -58,6 +67,7 @@ let currentRule = 0;
 let pendingSeat;
 let actionCooldownUntil = 0;
 let actionCooldownTimer;
+let soundsUnlocked = false;
 
 nameInput.value = localStorage.getItem(NAME_KEY) || "";
 const savedRole = localStorage.getItem(ROLE_KEY);
@@ -80,6 +90,27 @@ function setConnection(message) {
 function setNotice(message = "") {
   notice.textContent = message;
   joinNotice.textContent = message;
+}
+
+function unlockSounds() {
+  if (soundsUnlocked) return;
+  soundsUnlocked = true;
+  new Audio("/assets/sounds/null.wav").play().catch(() => {});
+}
+
+function playSound(name) {
+  if (!soundsUnlocked) return;
+  new Audio(`/assets/sounds/${sounds[name]}`).play().catch(() => {});
+}
+
+function playRoomSound(previous, room) {
+  if (!previous) return;
+  if (room.feedback === "correct" && previous.feedback !== "correct") playSound("correct");
+  else if (room.feedback === "wrong" && previous.feedback !== "wrong") playSound("wrong");
+  else if (room.doubles > previous.doubles) playSound("double");
+  else if (room.passes > previous.passes) playSound("pass");
+  else if (room.phase === "running" && previous.phase === "feedback") playSound("next");
+  else if (room.phase === "running" && previous.phase !== "running") playSound("start");
 }
 
 function socketUrl() {
@@ -126,6 +157,7 @@ function connect(name, initialRole) {
       setNotice();
       setConnection("Connesso");
     } else if (payload.type === "state") {
+      playRoomSound(roomState?.room, payload.room);
       roomState = payload;
       render();
     } else if (payload.type === "error") {
@@ -320,7 +352,7 @@ joinForm.addEventListener("submit", (event) => {
 
 actionButtons.forEach((button) => button.addEventListener("click", () => sendAction(button.dataset.action)));
 spectateButton.addEventListener("click", () => sendMembership("spectate"));
-helpButton.addEventListener("click", () => rulesDialog.showModal());
+helpButton.addEventListener("click", () => { playSound("click"); rulesDialog.showModal(); });
 previousRule.addEventListener("click", () => { currentRule -= 1; updateRule(); });
 nextRule.addEventListener("click", () => { currentRule += 1; updateRule(); });
 
@@ -342,5 +374,8 @@ window.addEventListener("keydown", (event) => {
     sendAction(action);
   }
 });
+
+document.addEventListener("pointerdown", unlockSounds, { once: true });
+window.addEventListener("keydown", unlockSounds, { once: true });
 
 updateRule();
