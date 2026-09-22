@@ -189,7 +189,7 @@ function canUse(action, room, you) {
       ? you.role === "guesser"
       : canControl && ["idle", "double-ready"].includes(room.phase);
   }
-  if (action === "skip") return you.role === "guesser" && room.phase === "running";
+  if (action === "skip") return ["helper", "guesser"].includes(you.role) && room.phase === "running";
   if (!canControl) return false;
   if (action === "finish") return room.started && room.phase !== "finished";
   if (["correct", "wrong"].includes(action)) return ["stopped", "round-ended"].includes(room.phase);
@@ -282,7 +282,7 @@ function render() {
   roleBadge.textContent = roleLabels[you.role] || "Spettatore";
   roleHint.textContent = describeRole(you.role);
   controlsPanel.hidden = !canControl;
-  stopPanel.hidden = !(you.role === "guesser" && room.phase === "running");
+  stopPanel.hidden = !(["helper", "guesser"].includes(you.role) && room.phase === "running");
   renderMembership(room, you);
   spectators.textContent = room.spectators;
   statRound.textContent = room.round;
