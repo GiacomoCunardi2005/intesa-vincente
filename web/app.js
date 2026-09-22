@@ -189,6 +189,7 @@ function canUse(action, room, you) {
       ? you.role === "guesser"
       : canControl && ["idle", "double-ready"].includes(room.phase);
   }
+  if (action === "skip") return you.role === "guesser" && room.phase === "running";
   if (!canControl) return false;
   if (action === "finish") return room.started && room.phase !== "finished";
   if (["correct", "wrong"].includes(action)) return ["stopped", "round-ended"].includes(room.phase);
@@ -372,6 +373,7 @@ window.addEventListener("keydown", (event) => {
     Backspace: "wrong",
     KeyP: "pass",
     KeyR: "double",
+    KeyS: "skip",
     KeyN: "next-round",
     KeyF: "finish",
   }[event.code];

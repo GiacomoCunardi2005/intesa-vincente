@@ -577,7 +577,8 @@ class GameRoom:
                 await self._send_error(session, "Servono tutti e tre i giocatori per iniziare.")
                 return
             can_stop_time = action == "space" and self.phase == "running" and role == "guesser"
-            if role != "controller" and not can_stop_time:
+            can_skip = action == "skip" and self.phase == "running" and role == "guesser"
+            if role != "controller" and not can_stop_time and not can_skip:
                 await self._send_error(session, f"In questo turno comanda solo {self._controller_name()}.")
                 return
             if self._sync_clock():
@@ -627,7 +628,7 @@ class GameRoom:
                 self.feedback = "normal"
                 self.word = ""
                 self.status = f"Turno {self.round}: {self._controller_name()} ha i comandi."
-            elif action == "pass":
+            elif action in ("pass", "skip"):
                 if self.phase not in ("running", "stopped"):
                     await self._send_error(session, "Il passo è disponibile solo durante una parola.")
                     return
@@ -835,6 +836,8 @@ async def self_check() -> None:
     deadline = room.deadline
     await room.command(controller, controller_socket, "pass")  # type: ignore[arg-type]
     assert room.phase == "running" and room.passes == 1 and room.word == "uno" and room.deadline == deadline
+    await room.command(guesser, guesser_socket, "skip")  # type: ignore[arg-type]
+    assert room.phase == "running" and room.passes == 2
     assert room._snapshot(guesser)["room"]["word"] == "uno"
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "running"
