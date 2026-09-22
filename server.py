@@ -252,7 +252,7 @@ class GameRoom:
         elif self._active_word():
             visible_word = self.word if can_see_word else None
         else:
-            visible_word = "Premi Spazio" if can_see_word else None
+            visible_word = "Premi Spazio" if can_see_word and self._team_ready() else "Attendi gli altri giocatori" if can_see_word else None
         roles = self._turn_roles()
         player_slots: list[dict[str, object] | None] = []
         for index, token in enumerate(self.players):
@@ -753,6 +753,9 @@ async def self_check() -> None:
     helper = Session("helper", "Bruno", seat=2, socket=helper_socket)  # type: ignore[arg-type]
     guesser = Session("guesser", "Clara", seat=3, socket=guesser_socket)  # type: ignore[arg-type]
     spectator = Session("spectator", "Dino", socket=spectator_socket)  # type: ignore[arg-type]
+    room.sessions = {controller.token: controller}
+    room.players = [controller.token, None, None]
+    assert room._snapshot(controller)["room"]["word"] == "Attendi gli altri giocatori"
     room.sessions = {session.token: session for session in (controller, helper, guesser, spectator)}
     room.players = [controller.token, helper.token, guesser.token]
 
