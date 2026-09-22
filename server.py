@@ -118,6 +118,7 @@ class GameRoom:
         self.lock = asyncio.Lock()
         self.timer_task: asyncio.Task[None] | None = None
         self.feedback_task: asyncio.Task[None] | None = None
+        self.reveal_task: asyncio.Task[None] | None = None
         self.disconnect_grace_seconds = DISCONNECT_GRACE_SECONDS
         self.deadline: float | None = None
         self.closing = False
@@ -159,6 +160,7 @@ class GameRoom:
     def _reset_state(self) -> None:
         self._stop_timer()
         self._stop_feedback()
+        self._stop_reveal()
         self.phase = "idle"
         self.remaining = ROUND_SECONDS
         self.score = 0
@@ -186,6 +188,13 @@ class GameRoom:
     def _stop_feedback(self) -> None:
         task = self.feedback_task
         self.feedback_task = None
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+
+    def _stop_reveal(self) -> None:
+        task = self.reveal_task
+        self.reveal_task = None
+        self.guesser_reveal = None
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
 
@@ -234,9 +243,12 @@ class GameRoom:
     def _snapshot(self, session: Session) -> dict[str, object]:
         role, seat = self._role(session)
         can_control = role == "controller" and self._team_ready()
-        can_see_word = role in {"controller", "helper"}
+        guesser_reveal = self.guesser_reveal if role == "guesser" else None
+        can_see_word = role in {"controller", "helper"} or guesser_reveal is not None
         if self.phase == "finished":
             visible_word = "Partita conclusa"
+        elif guesser_reveal is not None:
+            visible_word = guesser_reveal
         elif self._active_word():
             visible_word = self.word if can_see_word else None
         else:
@@ -436,6 +448,7 @@ class GameRoom:
             return
         self._stop_timer()
         self._stop_feedback()
+        self._stop_reveal()
         self.phase = "idle"
         self.remaining = ROUND_SECONDS
         self.active_double = False
@@ -476,6 +489,7 @@ class GameRoom:
         self._start_timer()
 
     def _answer(self, correct: bool, actor: str, status: str | None = None) -> None:
+        self._reveal_guesser()
         self.score = score_after_answer(self.score, correct, self.active_double)
         self.correct += int(correct)
         self.wrong += int(not correct)
@@ -487,6 +501,7 @@ class GameRoom:
         self.feedback_task = asyncio.create_task(self._feedback_loop())
 
     def _ready_for_next_word(self) -> None:
+        self._stop_reveal()
         self.phase = "idle"
         self.feedback = "normal"
         self.word = ""
@@ -500,6 +515,21 @@ class GameRoom:
                     self._ready_for_next_word()
                     self.feedback_task = None
                     await self._broadcast()
+        except asyncio.CancelledError:
+            return
+
+    def _reveal_guesser(self) -> None:
+        self._stop_reveal()
+        self.guesser_reveal = self.word
+        self.reveal_task = asyncio.create_task(self._reveal_loop())
+
+    async def _reveal_loop(self) -> None:
+        try:
+            await asyncio.sleep(FEEDBACK_SECONDS)
+            async with self.lock:
+                self.guesser_reveal = None
+                self.reveal_task = None
+                await self._broadcast()
         except asyncio.CancelledError:
             return
 
@@ -555,6 +585,7 @@ class GameRoom:
                     self._answer(False, actor, "Passi terminati: errore.")
                 else:
                     self.passes += 1
+                    self._reveal_guesser()
                     if self.phase == "running":
                         self.word = self._pick_word(self.words, self.used_words)
                         self.status = f"{actor} ha usato il passo {self.passes}/3 — tempo in corso."
@@ -585,6 +616,7 @@ class GameRoom:
             self.closing = True
             self._stop_timer()
             self._stop_feedback()
+            self._stop_reveal()
             sockets = [session.socket for session in self.sessions.values() if session.socket is not None]
             for session in self.sessions.values():
                 self._cancel_disconnect(session)
@@ -742,14 +774,22 @@ async def self_check() -> None:
     deadline = room.deadline
     await room.command(controller, controller_socket, "pass")  # type: ignore[arg-type]
     assert room.phase == "running" and room.passes == 1 and room.word == "uno" and room.deadline == deadline
+    assert room._snapshot(guesser)["room"]["word"] == "uno"
     await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "running"
     await room.command(guesser, guesser_socket, "space")  # type: ignore[arg-type]
     assert room.phase == "stopped"
+    await room.command(controller, controller_socket, "pass")  # type: ignore[arg-type]
+    assert room.phase == "idle" and room._snapshot(guesser)["room"]["word"] == "uno"
+    await room.command(controller, controller_socket, "space")  # type: ignore[arg-type]
+    await room.command(guesser, guesser_socket, "space")  # type: ignore[arg-type]
+    assert room.phase == "stopped"
     await room.command(controller, controller_socket, "correct")  # type: ignore[arg-type]
     assert room.score == 1 and room.correct == 1 and room.feedback == "correct"
+    assert room._snapshot(guesser)["room"]["word"] == "uno"
     room._stop_feedback()
     room._ready_for_next_word()
+    assert room._snapshot(guesser)["room"]["word"] is None
     room._finish()
     assert room.round == 2 and room._role(controller) == ("guesser", 1)
     assert room._role(helper) == ("controller", 2)
