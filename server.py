@@ -25,7 +25,7 @@ WEB = ROOT / "web"
 MAX_PLAYERS = 3
 ROUND_SECONDS = 60
 MAX_TURNS = 3
-FEEDBACK_SECONDS = 0.54
+FEEDBACK_SECONDS = 2
 DISCONNECT_GRACE_SECONDS = 30
 INITIAL_ROLE_SEATS = {"controller": 1, "helper": 2, "guesser": 3}
 RECORDS_PATH = Path(os.getenv("RECORDS_PATH", str(ROOT / "data" / "records.json")))
@@ -488,6 +488,7 @@ class GameRoom:
         self.word = self._pick_word(words, used)
         self.phase = "running"
         self.started = True
+        self.feedback = "normal"
         self.status = f"{actor} ha avviato la parola — l'indovino preme Spazio per fermare il tempo."
         self._start_timer()
 
@@ -515,8 +516,8 @@ class GameRoom:
             await asyncio.sleep(FEEDBACK_SECONDS)
             async with self.lock:
                 if self.phase == "feedback":
-                    self._ready_for_next_word()
                     self.feedback_task = None
+                    self._reveal_word(self._controller_name())
                     await self._broadcast()
         except asyncio.CancelledError:
             return
@@ -792,8 +793,8 @@ async def self_check() -> None:
     await room.command(controller, controller_socket, "correct")  # type: ignore[arg-type]
     assert room.score == 1 and room.correct == 1 and room.feedback == "correct"
     assert room._snapshot(guesser)["room"]["word"] == "uno"
-    room._stop_feedback()
-    room._ready_for_next_word()
+    await asyncio.sleep(FEEDBACK_SECONDS + 0.1)
+    assert room.phase == "running"
     assert room._snapshot(guesser)["room"]["word"] is None
     room._finish()
     assert room.round == 2 and room._role(controller) == ("guesser", 1)
